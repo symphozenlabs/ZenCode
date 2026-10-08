@@ -172,16 +172,46 @@
 
       // Trigger server-side QR generation & email dispatch via Resend
       try {
-        await fetch('/api/registration/send-confirmation', {
+        const response = await fetch('/api/registration/send-confirmation', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             collectionName: COLLECTIONS.PITCH_FEST,
-            teamId: docId
+            teamId: docId,
+            event: 'Pitch Fest',
+            teamLeader: {
+              name: member1.name,
+              admissionNumber: member1.admissionNumber,
+              yearOfStudy: member1.yearOfStudy,
+              email: member1.email
+            },
+            members: [
+              {
+                memberNumber: 1,
+                name: member1.name,
+                admissionNumber: member1.admissionNumber,
+                yearOfStudy: member1.yearOfStudy,
+                email: member1.email
+              },
+              {
+                memberNumber: 2,
+                name: member2.name,
+                admissionNumber: member2.admissionNumber,
+                yearOfStudy: member2.yearOfStudy,
+                email: member2.email
+              }
+            ]
           })
         });
+
+        if (!response.ok) {
+          const resJson = await response.json().catch(() => ({}));
+          console.error('[Pitch Fest Registration] Email dispatch error:', resJson.error || resJson.details);
+        } else {
+          console.log('[Pitch Fest Registration] Confirmation emails dispatched successfully.');
+        }
       } catch (emailErr) {
-        console.error('Confirmation email send failed (registration saved):', emailErr);
+        console.error('[Pitch Fest Registration] Confirmation email request failed:', emailErr);
       }
 
       isSuccess = true;

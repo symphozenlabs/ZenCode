@@ -9,41 +9,107 @@
   let error = $state('');
   let registrationData = $state(null);
   let collectionUsed = $state('');
+  let isCheckedIn = $state(false);
+  let checkInTime = $state('');
+
+  // Extract clean team ID if payload is a URL, encoded JSON, or raw ID
+  function extractCleanTeamId(rawInput) {
+    if (!rawInput) return '';
+    let cleaned = decodeURIComponent(rawInput).trim();
+
+    // If it's a JSON token string: {"type":"TEAM_ATTENDANCE","teamId":"..."}
+    if (cleaned.startsWith('{') && cleaned.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(cleaned);
+        if (parsed.teamId) return parsed.teamId;
+      } catch (e) {
+        // Fallback to raw
+      }
+    }
+
+    // If it's a URL path like /check-in/XYZ
+    if (cleaned.includes('/check-in/')) {
+      const parts = cleaned.split('/check-in/');
+      return parts[parts.length - 1].split('?')[0].split('/')[0];
+    }
+
+    return cleaned;
+  }
+
+  const cleanTeamId = $derived(extractCleanTeamId(teamId));
+
+  const teamNameDisplay = $derived.by(() => {
+    if (!registrationData) return 'Team';
+    if (registrationData.teamName) return registrationData.teamName;
+    const leader = registrationData.teamLeader?.name || 'ZenCode';
+    const event = registrationData.event || 'Team';
+    return `${leader}'s ${event} Team`;
+  });
+
+  const displayMembers = $derived.by(() => {
+    if (!registrationData?.members || !Array.isArray(registrationData.members)) return [];
+    if (!registrationData?.teamLeader) return registrationData.members;
+
+    const leaderEmail = (registrationData.teamLeader.email || '').trim().toLowerCase();
+    const leaderAdm = (registrationData.teamLeader.admissionNumber || '').trim().toLowerCase();
+
+    return registrationData.members.filter(m => {
+      const mEmail = (m.email || '').trim().toLowerCase();
+      const mAdm = (m.admissionNumber || '').trim().toLowerCase();
+      if (leaderEmail && mEmail === leaderEmail) return false;
+      if (leaderAdm && mAdm === leaderAdm) return false;
+      return true;
+    });
+  });
 
   onMount(async () => {
-    if (!teamId) {
-      error = 'No Team Registration ID provided in URL.';
+    const targetId = cleanTeamId;
+    if (!targetId) {
+      error = 'No Team Registration ID provided in QR Code / URL.';
       loading = false;
       return;
     }
 
     try {
       // First check Hackathon collection
-      const hackRef = doc(db, COLLECTIONS.HACKATHON, teamId);
+      const hackRef = doc(db, COLLECTIONS.HACKATHON, targetId);
       const hackSnap = await getDoc(hackRef);
 
       if (hackSnap.exists()) {
         registrationData = { id: hackSnap.id, ...hackSnap.data() };
         collectionUsed = COLLECTIONS.HACKATHON;
+        if (hackSnap.data().checkedIn) {
+          isCheckedIn = true;
+          checkInTime = hackSnap.data().checkedInAt || 'Already Recorded';
+        }
       } else {
         // Next check Pitch Fest collection
-        const pitchRef = doc(db, COLLECTIONS.PITCH_FEST, teamId);
+        const pitchRef = doc(db, COLLECTIONS.PITCH_FEST, targetId);
         const pitchSnap = await getDoc(pitchRef);
 
         if (pitchSnap.exists()) {
           registrationData = { id: pitchSnap.id, ...pitchSnap.data() };
           collectionUsed = COLLECTIONS.PITCH_FEST;
+          if (pitchSnap.data().checkedIn) {
+            isCheckedIn = true;
+            checkInTime = pitchSnap.data().checkedInAt || 'Already Recorded';
+          }
         } else {
-          error = `No registration found for Team ID: "${teamId}".`;
+          error = `No registration record found for Team ID: "${targetId}".`;
         }
       }
     } catch (err) {
       console.error('Error fetching registration:', err);
-      error = 'Failed to load team check-in details. Please try again.';
+      error = 'Failed to load team check-in details. Please check the network connection and try again.';
     } finally {
       loading = false;
     }
   });
+
+  function handleCheckInTeam() {
+    isCheckedIn = true;
+    checkInTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
 
   function formatDate(timestamp) {
     if (!timestamp) return 'N/A';
@@ -108,25 +174,50 @@
             Registration Verified
           </div>
           <h2 class="event-title">{registrationData.event || 'ZenCode Event'}</h2>
-          <div class="team-id-pill">
-            Team ID: <code>{registrationData.id}</code>
+          <div class="team-meta-line">
+            <div class="team-name-tag">{teamNameDisplay}</div>
+            <div class="team-id-pill">
+              Team ID: <code>{registrationData.id}</code>
+            </div>
           </div>
+        </div>
+
+        <!-- Attendance Check-in Banner -->
+        <div class="attendance-banner {isCheckedIn ? 'checked-in-state' : 'pending-state'}">
+          <div class="attendance-status-info">
+            <div class="attendance-label">TEAM ATTENDANCE STATUS</div>
+            <div class="attendance-value">
+              {#if isCheckedIn}
+                <span class="status-checked-badge">✓ Team Checked In ({checkInTime})</span>
+              {:else}
+                <span class="status-pending-badge">Pending Attendance Desk Check-in</span>
+              {/if}
+            </div>
+          </div>
+
+          {#if !isCheckedIn}
+            <button type="button" class="checkin-action-btn" onclick={handleCheckInTeam}>
+              ✓ Mark Team as Checked In
+            </button>
+          {:else}
+            <div class="checked-in-stamp">
+              All team members marked present
+            </div>
+          {/if}
         </div>
 
         <div class="meta-row">
           <div class="meta-item">
+            <span class="meta-label">Event</span>
+            <span class="meta-value">{registrationData.event || 'Hackathon'}</span>
+          </div>
+          <div class="meta-item">
             <span class="meta-label">Team Size</span>
-            <span class="meta-value">{registrationData.teamSize || (registrationData.members ? registrationData.members.length : 1)} Members</span>
+            <span class="meta-value">{registrationData.teamSize || (displayMembers.length + 1)} Members</span>
           </div>
           <div class="meta-item">
             <span class="meta-label">Registered At</span>
             <span class="meta-value">{formatDate(registrationData.registeredAt)}</span>
-          </div>
-          <div class="meta-item">
-            <span class="meta-label">Email Pass Status</span>
-            <span class="meta-value status-pill {registrationData.confirmationEmailStatus || 'sent'}">
-              {registrationData.confirmationEmailStatus || 'Sent'}
-            </span>
           </div>
         </div>
 
@@ -148,7 +239,7 @@
                 </div>
                 <div class="detail-row">
                   <span class="detail-label">Year of Study:</span>
-                  <span class="detail-val">{registrationData.teamLeader.yearOfStudy || 'N/A'}</span>
+                  <span class="detail-val">{registrationData.teamLeader.yearOfStudy || registrationData.teamLeader.classSection || 'N/A'}</span>
                 </div>
                 <div class="detail-row">
                   <span class="detail-label">Email:</span>
@@ -157,29 +248,27 @@
               </div>
             {/if}
 
-            {#if registrationData.members && Array.isArray(registrationData.members)}
-              {#each registrationData.members.slice(registrationData.teamLeader ? 1 : 0) as m, idx}
-                <div class="member-card">
-                  <div class="card-header">
-                    <span class="member-num">{idx + 2}</span>
-                    <span class="role-badge">Member</span>
-                  </div>
-                  <div class="member-name">{m.name}</div>
-                  <div class="detail-row">
-                    <span class="detail-label">Admission No:</span>
-                    <span class="detail-val">{m.admissionNumber}</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">Year of Study:</span>
-                    <span class="detail-val">{m.yearOfStudy || 'N/A'}</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">Email:</span>
-                    <span class="detail-val">{m.email}</span>
-                  </div>
+            {#each displayMembers as m, idx}
+              <div class="member-card">
+                <div class="card-header">
+                  <span class="member-num">{idx + 2}</span>
+                  <span class="role-badge">Member</span>
                 </div>
-              {/each}
-            {/if}
+                <div class="member-name">{m.name}</div>
+                <div class="detail-row">
+                  <span class="detail-label">Admission No:</span>
+                  <span class="detail-val">{m.admissionNumber}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Year of Study:</span>
+                  <span class="detail-val">{m.yearOfStudy || m.classSection || 'N/A'}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Email:</span>
+                  <span class="detail-val">{m.email}</span>
+                </div>
+              </div>
+            {/each}
           </div>
         </div>
 
@@ -372,13 +461,115 @@
     color: #ffffff;
   }
 
+  .team-meta-line {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: 12px;
+    margin-top: 8px;
+  }
+
+  .team-name-tag {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #e2e8f0;
+    background: rgba(255, 255, 255, 0.08);
+    padding: 4px 14px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+  }
+
   .team-id-pill code {
     background: #0f172a;
-    padding: 4px 10px;
+    padding: 5px 12px;
     border-radius: 6px;
     color: #38bdf8;
     font-family: monospace;
     font-size: 0.95rem;
+    font-weight: 700;
+    border: 1px solid #334155;
+  }
+
+  .attendance-banner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px 20px;
+    border-radius: 12px;
+    margin: 20px 0;
+    transition: all 0.2s ease;
+
+    &.pending-state {
+      background: rgba(245, 158, 11, 0.1);
+      border: 1.5px solid rgba(245, 158, 11, 0.3);
+    }
+
+    &.checked-in-state {
+      background: rgba(16, 185, 129, 0.12);
+      border: 1.5px solid rgba(16, 185, 129, 0.4);
+    }
+  }
+
+  .attendance-status-info {
+    text-align: left;
+  }
+
+  .attendance-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: #94a3b8;
+    text-transform: uppercase;
+  }
+
+  .attendance-value {
+    margin-top: 4px;
+  }
+
+  .status-pending-badge {
+    color: #fbbf24;
+    font-weight: 700;
+    font-size: 0.95rem;
+  }
+
+  .status-checked-badge {
+    color: #34d399;
+    font-weight: 800;
+    font-size: 1.05rem;
+  }
+
+  .checkin-action-btn {
+    background: #10b981;
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 0.95rem;
+    padding: 10px 20px;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+    transition: background 0.15s ease, transform 0.1s ease;
+
+    &:hover {
+      background: #059669;
+      transform: translateY(-1px);
+    }
+
+    &:active {
+      transform: translateY(0);
+    }
+  }
+
+  .checked-in-stamp {
+    font-size: 0.85rem;
+    color: #a7f3d0;
+    font-weight: 600;
+    background: rgba(16, 185, 129, 0.2);
+    padding: 6px 14px;
+    border-radius: 20px;
   }
 
   .meta-row {

@@ -6,15 +6,13 @@ import { handleSendConfirmationApi } from './src/lib/server/apiHandler.js'
 export default defineConfig(({ mode }) => {
   // Load environment variables from .env file into process.env for Node server middleware
   const env = loadEnv(mode, process.cwd(), '');
+  Object.assign(process.env, env);
 
-  if (env.RESEND_API_KEY) {
-    process.env.RESEND_API_KEY = env.RESEND_API_KEY;
+  if (env.RESEND_FROM && !process.env.RESEND_FROM_EMAIL) {
+    process.env.RESEND_FROM_EMAIL = env.RESEND_FROM;
   }
-  if (env.RESEND_FROM_EMAIL) {
-    process.env.RESEND_FROM_EMAIL = env.RESEND_FROM_EMAIL;
-  }
-  if (env.RESEND_TEST_RECIPIENT) {
-    process.env.RESEND_TEST_RECIPIENT = env.RESEND_TEST_RECIPIENT;
+  if (env.RESEND_FROM_EMAIL && !process.env.RESEND_FROM) {
+    process.env.RESEND_FROM = env.RESEND_FROM_EMAIL;
   }
 
   return {

@@ -1,13 +1,43 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { Resend } from 'resend';
 import { generateTeamQRCode } from './qr.js';
 import { buildRegistrationPassEmailHtml } from './emailTemplate.js';
 
 /**
- * Gets server environment variable safely
+ * Loads environment variables from .env file if not already populated in process.env.
+ */
+function ensureEnvLoaded() {
+  if (process.env.RESEND_API_KEY) return;
+  try {
+    const envPath = path.resolve(process.cwd(), '.env');
+    if (fs.existsSync(envPath)) {
+      const content = fs.readFileSync(envPath, 'utf8');
+      content.split('\n').forEach(line => {
+        const match = line.match(/^\s*([\w.-]+)\s*=\s*(.*)?\s*$/);
+        if (match) {
+          const key = match[1];
+          let val = (match[2] || '').trim();
+          if (val.startsWith('"') && val.endsWith('"')) val = val.slice(1, -1);
+          if (val.startsWith("'") && val.endsWith("'")) val = val.slice(1, -1);
+          if (val && !process.env[key]) {
+            process.env[key] = val;
+          }
+        }
+      });
+    }
+  } catch (e) {
+    // Ignore fallback errors
+  }
+}
+
+/**
+ * Gets server environment variable safely across Node and Vite
  * @param {string} key
  * @returns {string}
  */
 function getServerEnv(key) {
+  ensureEnvLoaded();
   const proc = typeof process !== 'undefined' && process.env ? process.env[key] : '';
   const meta = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env[key] : '';
   return proc || meta || '';
@@ -22,19 +52,21 @@ function getServerEnv(key) {
  */
 function getSanitizedSender(rawSender) {
   const defaultSender = 'ZEN CODE 2026 <onboarding@resend.dev>';
-  if (!rawSender) {
+  if (!rawSender || !rawSender.trim()) {
     return { sender: defaultSender };
   }
 
+  const trimmed = rawSender.trim();
+
   // Check if sender uses @gmail.com directly without custom verified domain
-  if (rawSender.toLowerCase().includes('@gmail.com')) {
+  if (trimmed.toLowerCase().includes('@gmail.com')) {
     return {
       sender: defaultSender,
-      warning: `Configured RESEND_FROM_EMAIL ("${rawSender}") uses @gmail.com. Resend requires a verified custom domain to send from @gmail.com. Defaulted to "${defaultSender}".`
+      warning: `Configured sender ("${trimmed}") uses @gmail.com. Resend requires a verified custom domain to send from @gmail.com. Defaulted to "${defaultSender}".`
     };
   }
 
-  return { sender: rawSender };
+  return { sender: trimmed };
 }
 
 /**
@@ -46,8 +78,6 @@ function getSanitizedSender(rawSender) {
  * @param {Object} params.teamLeader - Leader details { name, admissionNumber, yearOfStudy, email }
  * @param {Array<Object>} params.members - List of all team members
  * @param {string} [params.baseUrl] - Domain/host origin URL for check-in route
- * @param {boolean} [params.isDevTest] - Explicit CLI test mode flag
- * @param {string} [params.devOverrideRecipient] - Optional CLI test recipient override
  * @returns {Promise<{ success: boolean, allSuccess: boolean, qrUrl: string, results: Array<Object> }>}
  */
 export async function sendTeamConfirmationEmails({
@@ -55,28 +85,22 @@ export async function sendTeamConfirmationEmails({
   event,
   teamLeader,
   members = [],
-  baseUrl = 'http://localhost:5173',
-  isDevTest = false,
-  devOverrideRecipient = null
+  baseUrl = 'http://localhost:5173'
 }) {
   if (!teamId) {
     throw new Error('teamId is required for generating registration passes');
   }
 
   const apiKey = getServerEnv('RESEND_API_KEY');
-  const configuredFromEmail = getServerEnv('RESEND_FROM_EMAIL');
-
-  console.log(`[Email Service] RESEND_API_KEY configured: ${Boolean(apiKey)}`);
-  console.log(`[Email Service] RESEND_FROM_EMAIL configured: ${Boolean(configuredFromEmail)}`);
+  const configuredFromEmail = getServerEnv('RESEND_FROM') || getServerEnv('RESEND_FROM_EMAIL');
 
   if (!apiKey) {
-    console.warn('❌ RESEND_API_KEY is not configured in environment variables. Email sending skipped.');
+    console.error('❌ [EMAIL ERROR] RESEND_API_KEY is not configured in environment variables.');
     return {
       success: false,
       allSuccess: false,
       skipped: true,
       message: 'RESEND_API_KEY missing from environment',
-      qrUrl: `${baseUrl.replace(/\/$/, '')}/check-in/${teamId}`,
       results: []
     };
   }
@@ -88,59 +112,70 @@ export async function sendTeamConfirmationEmails({
     console.warn(`⚠️ [Resend Sender Notice]: ${senderWarning}`);
   }
 
-  // Generate URL encoded into the QR code
-  const checkInUrl = `${baseUrl.replace(/\/$/, '')}/check-in/${teamId}`;
+  // Generate 1 shared URL encoded into the QR code for the ENTIRE team
+  const cleanBaseUrl = baseUrl.replace(/\/$/, '');
+  const checkInUrl = `${cleanBaseUrl}/check-in/${encodeURIComponent(teamId)}`;
   
-  // Generate 1 shared QR code for the entire team on the server
-  const qrDataUrl = await generateTeamQRCode(checkInUrl);
-
-  // Extract base64 PNG string for CID inline attachment (without data URI prefix)
-  const base64Content = qrDataUrl.replace(/^data:image\/png;base64,/, '');
-
-  // Derive Team Name
-  const eventName = event || 'ZenCode Event';
-  const leaderName = teamLeader?.name || 'Team';
-  const teamName = `${leaderName}'s ${eventName} Team`;
-
-  // Combine team leader and members into a deduplicated unique member list
-  const allRecipientsMap = new Map();
-
-  if (teamLeader && teamLeader.email && teamLeader.email.trim()) {
-    const normLeaderEmail = teamLeader.email.trim().toLowerCase();
-    allRecipientsMap.set(normLeaderEmail, {
-      name: teamLeader.name,
-      admissionNumber: teamLeader.admissionNumber,
-      yearOfStudy: teamLeader.yearOfStudy,
-      email: normLeaderEmail
-    });
+  // 1. Generate QR Code image server-side via QRCode package
+  let qrDataUrl = '';
+  try {
+    qrDataUrl = await generateTeamQRCode(checkInUrl);
+    console.log('[REGISTRATION] QR generation successful');
+  } catch (qrErr) {
+    console.error('❌ [REGISTRATION ERROR] QR code generation failed:', qrErr);
+    throw qrErr;
   }
 
-  members.forEach(m => {
-    if (m && m.email && m.email.trim()) {
-      const normEmail = m.email.trim().toLowerCase();
-      if (!allRecipientsMap.has(normEmail)) {
-        allRecipientsMap.set(normEmail, {
-          name: m.name,
-          admissionNumber: m.admissionNumber,
-          yearOfStudy: m.yearOfStudy,
-          email: normEmail
+  // Extract base64 content for email attachment
+  const base64Content = qrDataUrl.replace(/^data:image\/png;base64,/, '');
+
+  // Hosted QR image URL that renders reliably across Resend preview, Gmail, Yahoo, Outlook
+  const hostedQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(checkInUrl)}`;
+
+  // Derive Event & Team Name
+  const eventName = event || 'Hackathon';
+  const leaderName = teamLeader?.name?.trim() || 'Team';
+  const teamName = `${leaderName}'s ${eventName} Team`;
+
+  // Deduplicate and validate all recipient members
+  const allRecipientsMap = new Map();
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  // Add team leader if valid email
+  if (teamLeader && teamLeader.email && typeof teamLeader.email === 'string') {
+    const leaderEmail = teamLeader.email.trim().toLowerCase();
+    if (emailRegex.test(leaderEmail)) {
+      allRecipientsMap.set(leaderEmail, {
+        name: (teamLeader.name || 'Team Leader').trim(),
+        admissionNumber: (teamLeader.admissionNumber || '').trim(),
+        yearOfStudy: (teamLeader.yearOfStudy || teamLeader.classSection || '').trim(),
+        email: leaderEmail
+      });
+    }
+  }
+
+  // Add other team members
+  if (Array.isArray(members)) {
+    members.forEach(m => {
+      if (!m || !m.email || typeof m.email !== 'string') return;
+      const memEmail = m.email.trim().toLowerCase();
+      if (emailRegex.test(memEmail) && !allRecipientsMap.has(memEmail)) {
+        allRecipientsMap.set(memEmail, {
+          name: (m.name || 'Team Member').trim(),
+          admissionNumber: (m.admissionNumber || '').trim(),
+          yearOfStudy: (m.yearOfStudy || m.classSection || '').trim(),
+          email: memEmail
         });
       }
-    }
-  });
+    });
+  }
 
   const uniqueMembers = Array.from(allRecipientsMap.values());
   const emailResults = [];
 
   for (const member of uniqueMembers) {
-    // STRICT PRODUCTION RECIPIENT LOGIC:
-    // Normal registration ALWAYS uses member.email.
-    // devOverrideRecipient is ONLY applied if isDevTest === true.
-    const targetEmail = (isDevTest && devOverrideRecipient) 
-      ? devOverrideRecipient.trim().toLowerCase()
-      : member.email.trim().toLowerCase();
-
-    console.log(`📧 Preparing confirmation email for "${member.name}" -> Destination: ${targetEmail}`);
+    console.log(`[EMAIL] Preparing email for ${member.email}`);
+    console.log(`[EMAIL] Sending through Resend`);
 
     const htmlContent = buildRegistrationPassEmailHtml({
       studentName: member.name,
@@ -149,62 +184,64 @@ export async function sendTeamConfirmationEmails({
       eventType: eventName,
       teamName: teamName,
       teamId: teamId,
-      qrDataUrl: qrDataUrl
+      checkInUrl: checkInUrl,
+      qrImageUrl: hostedQrUrl
     });
 
     try {
       const response = await resend.emails.send({
         from: fromAddress,
-        to: [targetEmail],
+        to: [member.email],
         subject: `🎟️ Your ZEN CODE 2026 Check-in Pass (${eventName})`,
         html: htmlContent,
         attachments: [
           {
             filename: 'team-checkin-qr.png',
-            content: base64Content,
-            contentType: 'image/png',
-            contentId: 'team-qr-code'
+            content: base64Content
           }
         ]
       });
 
       // Resend SDK returns { data, error }
       if (response.error) {
-        console.error(`❌ Resend API Error for ${targetEmail}:`, response.error);
+        const errorMsg = response.error.message || JSON.stringify(response.error);
+        console.error(`[EMAIL ERROR] Failed to send to ${member.email}`);
+        console.error(`[EMAIL ERROR] ${errorMsg}`);
         emailResults.push({
           memberEmail: member.email,
-          sentTo: targetEmail,
           status: 'failed',
           id: null,
-          error: response.error.message || JSON.stringify(response.error)
+          error: errorMsg
         });
       } else if (response.data && response.data.id) {
-        console.log(`✅ Resend Email accepted for ${targetEmail}. Resend Message ID: ${response.data.id}`);
+        console.log(`[EMAIL] Resend response: ${JSON.stringify(response.data)}`);
+        console.log(`[EMAIL] Email sent successfully to ${member.email}`);
         emailResults.push({
           memberEmail: member.email,
-          sentTo: targetEmail,
           status: 'sent',
           id: response.data.id,
           error: null
         });
       } else {
-        console.warn(`⚠️ Unexpected Resend response structure for ${targetEmail}:`, response);
+        const errorMsg = 'Empty response data from Resend';
+        console.error(`[EMAIL ERROR] Failed to send to ${member.email}`);
+        console.error(`[EMAIL ERROR] ${errorMsg}`);
         emailResults.push({
           memberEmail: member.email,
-          sentTo: targetEmail,
           status: 'failed',
           id: null,
-          error: 'Empty response data from Resend'
+          error: errorMsg
         });
       }
     } catch (err) {
-      console.error(`❌ Exception sending pass email to ${targetEmail}:`, err);
+      const errorMsg = err.message || 'Network exception during Resend request';
+      console.error(`[EMAIL ERROR] Failed to send to ${member.email}`);
+      console.error(`[EMAIL ERROR] ${errorMsg}`);
       emailResults.push({
         memberEmail: member.email,
-        sentTo: targetEmail,
         status: 'failed',
         id: null,
-        error: err.message || 'Network exception during Resend request'
+        error: errorMsg
       });
     }
   }

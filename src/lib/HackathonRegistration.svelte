@@ -256,16 +256,31 @@
 
       // Trigger server-side QR generation & email dispatch via Resend
       try {
-        await fetch('/api/registration/send-confirmation', {
+        const response = await fetch('/api/registration/send-confirmation', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             collectionName: COLLECTIONS.HACKATHON,
-            teamId: docId
+            teamId: docId,
+            event: 'Hackathon',
+            teamLeader: {
+              name: teamLeader.name,
+              admissionNumber: teamLeader.admissionNumber,
+              yearOfStudy: teamLeader.yearOfStudy,
+              email: teamLeader.email
+            },
+            members: membersList
           })
         });
+
+        if (!response.ok) {
+          const resJson = await response.json().catch(() => ({}));
+          console.error('[Hackathon Registration] Email dispatch error:', resJson.error || resJson.details);
+        } else {
+          console.log('[Hackathon Registration] Confirmation emails dispatched successfully.');
+        }
       } catch (emailErr) {
-        console.error('Confirmation email send failed (registration saved):', emailErr);
+        console.error('[Hackathon Registration] Confirmation email request failed:', emailErr);
       }
 
       isSuccess = true;

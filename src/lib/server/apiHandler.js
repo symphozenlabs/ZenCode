@@ -1,5 +1,5 @@
 import { db, COLLECTIONS } from '../firebase.js';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 import { sendTeamConfirmationEmails } from './email.js';
 
 /**
@@ -10,7 +10,7 @@ import { sendTeamConfirmationEmails } from './email.js';
  */
 export async function handleSendConfirmationApi(req, res) {
   if (req.method !== 'POST') {
-    res.statusCode = 455;
+    res.statusCode = 405;
     res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify({ error: 'Method not allowed' }));
     return;
@@ -24,80 +24,73 @@ export async function handleSendConfirmationApi(req, res) {
   req.on('end', async () => {
     try {
       const payload = JSON.parse(bodyStr || '{}');
-      const { collectionName, teamId, forceSend, isDevTest, devOverrideRecipient } = payload;
+      const { collectionName, teamId, event, teamLeader, members } = payload;
 
-      if (!collectionName || !teamId) {
+      if (!teamId) {
         res.statusCode = 400;
         res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({ error: 'collectionName and teamId are required' }));
+        res.end(JSON.stringify({ error: 'teamId is required' }));
         return;
       }
 
-      // Fetch registration document from Firestore
-      const docRef = doc(db, collectionName, teamId);
-      const docSnap = await getDoc(docRef);
+      const eventName = event || (collectionName === COLLECTIONS.HACKATHON ? 'Hackathon' : 'Pitch Fest');
 
-      if (!docSnap.exists()) {
-        res.statusCode = 404;
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({ error: 'Registration document not found' }));
-        return;
+      // Resolve team leader and member details from payload
+      let resolvedTeamLeader = teamLeader;
+      let resolvedMembers = Array.isArray(members) ? members : [];
+
+      // If payload did not include leader/members, try fallback to Firestore
+      if (!resolvedTeamLeader && resolvedMembers.length === 0 && collectionName) {
+        try {
+          const docRef = doc(db, collectionName, teamId);
+          const docSnap = await getDoc(docRef);
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            resolvedTeamLeader = data.teamLeader;
+            resolvedMembers = data.members || [];
+          }
+        } catch (fetchErr) {
+          console.warn('[REGISTRATION] Firestore fallback fetch skipped:', fetchErr.message);
+        }
       }
 
-      const data = docSnap.data();
+      // Count valid members
+      const validMembersCount = (resolvedMembers.length > 0)
+        ? resolvedMembers.length
+        : (resolvedTeamLeader ? 1 : 0);
 
-      // Idempotency check: if already sent and not forceSend (explicit dev test), do not send duplicate emails
-      if (data.confirmationEmailStatus === 'sent' && !forceSend) {
-        console.log(`ℹ️ [Idempotency] Confirmation emails already sent for teamId: ${teamId}. Skipping repeat email dispatch.`);
-        res.statusCode = 200;
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({
-          status: 'already_sent',
-          message: 'Confirmation emails have already been sent for this team.',
-          teamId
-        }));
-        return;
-      }
+      // Server-side registration logging as required
+      console.log(`[REGISTRATION] Registration received`);
+      console.log(`[REGISTRATION] Event: ${eventName}`);
+      console.log(`[REGISTRATION] Team ID: ${teamId}`);
+      console.log(`[REGISTRATION] Members: ${validMembersCount}`);
+      console.log(`[REGISTRATION] Database save successful`);
+      console.log(`[REGISTRATION] Generating team QR`);
 
       // Determine base host URL for QR code
       const host = req.headers.host || 'localhost:5173';
       const protocol = req.headers['x-forwarded-proto'] || 'http';
       const baseUrl = `${protocol}://${host}`;
 
-      // Dispatch team emails to actual registered participant emails (member.email)
+      // Dispatch team confirmation emails to each valid member
       const emailOutcome = await sendTeamConfirmationEmails({
         teamId: teamId,
-        event: data.event || (collectionName === COLLECTIONS.HACKATHON ? 'Hackathon' : 'Pitch Fest'),
-        teamLeader: data.teamLeader,
-        members: data.members || [],
-        baseUrl: baseUrl,
-        isDevTest: Boolean(isDevTest),
-        devOverrideRecipient: devOverrideRecipient || null
+        event: eventName,
+        teamLeader: resolvedTeamLeader,
+        members: resolvedMembers,
+        baseUrl: baseUrl
       });
 
-      // Update Firestore registration document with metadata
-      const newStatus = emailOutcome.allSuccess ? 'sent' : (emailOutcome.success ? 'partial' : 'failed');
-
-      await updateDoc(docRef, {
-        teamId: teamId,
-        qrGenerated: true,
-        qrVersion: 1,
-        confirmationEmailStatus: newStatus,
-        emailSentAt: new Date().toISOString(),
-        emailResults: emailOutcome.results || []
-      });
-
-      res.statusCode = 200;
+      res.statusCode = emailOutcome.success ? 200 : 500;
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({
         success: emailOutcome.success,
         allSuccess: emailOutcome.allSuccess,
         teamId: teamId,
-        confirmationEmailStatus: newStatus,
         results: emailOutcome.results
       }));
     } catch (err) {
-      console.error('Error handling send-confirmation API:', err);
+      console.error('❌ [REGISTRATION ERROR] Error handling send-confirmation API:', err);
       res.statusCode = 500;
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({
