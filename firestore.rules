@@ -1,0 +1,50 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper function to validate Hackathon registration payload
+    function isValidHackathon(data) {
+      return data.event == 'Hackathon'
+        && (data.teamSize == 3 || data.teamSize == 4)
+        && data.teamLeader is map
+        && data.teamLeader.name is string && data.teamLeader.name.size() > 0
+        && data.teamLeader.admissionNumber is string && data.teamLeader.admissionNumber.size() > 0
+        && (
+          (data.teamLeader.yearOfStudy is string && data.teamLeader.yearOfStudy.size() > 0) ||
+          (data.teamLeader.classSection is string && data.teamLeader.classSection.size() > 0)
+        )
+        && data.teamLeader.email is string && data.teamLeader.email.size() > 0
+        && data.members is list
+        && data.members.size() == data.teamSize
+        && data.registeredAt == request.time;
+    }
+
+    // Helper function to validate Pitch Fest registration payload
+    function isValidPitchFest(data) {
+      return data.event == 'Pitch Fest'
+        && data.teamSize == 2
+        && data.teamLeader is map
+        && data.teamLeader.name is string && data.teamLeader.name.size() > 0
+        && data.teamLeader.admissionNumber is string && data.teamLeader.admissionNumber.size() > 0
+        && (
+          (data.teamLeader.yearOfStudy is string && data.teamLeader.yearOfStudy.size() > 0) ||
+          (data.teamLeader.classSection is string && data.teamLeader.classSection.size() > 0)
+        )
+        && data.teamLeader.email is string && data.teamLeader.email.size() > 0
+        && data.members is list
+        && data.members.size() == 2
+        && data.registeredAt == request.time;
+    }
+
+    match /hackathon_registered_participants/{docId} {
+      allow read: if true;
+      allow create: if isValidHackathon(request.resource.data);
+      allow update, delete: if false;
+    }
+
+    match /pitchfest_registered_participants/{docId} {
+      allow read: if true;
+      allow create: if isValidPitchFest(request.resource.data);
+      allow update, delete: if false;
+    }
+  }
+}
