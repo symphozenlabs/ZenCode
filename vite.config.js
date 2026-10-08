@@ -1,6 +1,5 @@
 import { svelte } from '@sveltejs/vite-plugin-svelte'
 import { defineConfig, loadEnv } from 'vite'
-import { handleSendConfirmationApi } from './src/lib/server/apiHandler.js'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
@@ -21,8 +20,20 @@ export default defineConfig(({ mode }) => {
       {
         name: 'registration-api-middleware',
         configureServer(server) {
-          server.middlewares.use('/api/registration/send-confirmation', (req, res) => {
-            handleSendConfirmationApi(req, res);
+          let handlerPromise;
+
+          server.middlewares.use('/api/registration/send-confirmation', async (req, res) => {
+            try {
+              handlerPromise ??= import('./src/lib/server/apiHandler.js')
+                .then((module) => module.handleSendConfirmationApi);
+              const handleSendConfirmationApi = await handlerPromise;
+              handleSendConfirmationApi(req, res);
+            } catch (err) {
+              console.error('❌ [REGISTRATION ERROR] Failed to load API handler:', err);
+              res.statusCode = 500;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ error: 'Failed to load registration API handler' }));
+            }
           });
         }
       }

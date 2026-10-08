@@ -4,23 +4,70 @@ import { Resend } from 'resend';
 import { generateTeamQRCode } from './qr.js';
 import { buildRegistrationPassEmailHtml } from './emailTemplate.js';
 
+let envLoaded = false;
+
+function stripInlineComment(value) {
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+
+  for (let i = 0; i < value.length; i += 1) {
+    const char = value[i];
+    const previous = value[i - 1];
+
+    if (char === "'" && !inDoubleQuote && previous !== '\\') {
+      inSingleQuote = !inSingleQuote;
+    } else if (char === '"' && !inSingleQuote && previous !== '\\') {
+      inDoubleQuote = !inDoubleQuote;
+    } else if (char === '#' && !inSingleQuote && !inDoubleQuote && /\s/.test(previous || '')) {
+      return value.slice(0, i).trim();
+    }
+  }
+
+  return value.trim();
+}
+
+function parseEnvValue(rawValue = '') {
+  let value = stripInlineComment(rawValue);
+
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    value = value.slice(1, -1);
+  }
+
+  return value.trim();
+}
+
+function isPlaceholderEnvValue(value) {
+  return /your_resend_api_key_here|your_api_key|placeholder/i.test(value || '');
+}
+
 /**
- * Loads environment variables from .env file if not already populated in process.env.
+ * Loads server environment variables from Vite-style env files for standalone Node paths.
  */
 function ensureEnvLoaded() {
-  if (process.env.RESEND_API_KEY) return;
+  if (envLoaded) return;
+  envLoaded = true;
+
   try {
-    const envPath = path.resolve(process.cwd(), '.env');
-    if (fs.existsSync(envPath)) {
+    const mode = process.env.NODE_ENV || process.env.MODE || 'development';
+    const envFiles = ['.env', '.env.local', `.env.${mode}`, `.env.${mode}.local`];
+
+    for (const envFile of envFiles) {
+      const envPath = path.resolve(process.cwd(), envFile);
+      if (!fs.existsSync(envPath)) continue;
+
       const content = fs.readFileSync(envPath, 'utf8');
       content.split('\n').forEach(line => {
+        if (!line.trim() || line.trim().startsWith('#')) return;
+
         const match = line.match(/^\s*([\w.-]+)\s*=\s*(.*)?\s*$/);
         if (match) {
           const key = match[1];
-          let val = (match[2] || '').trim();
-          if (val.startsWith('"') && val.endsWith('"')) val = val.slice(1, -1);
-          if (val.startsWith("'") && val.endsWith("'")) val = val.slice(1, -1);
-          if (val && !process.env[key]) {
+          const val = parseEnvValue(match[2] || '');
+          const existingVal = parseEnvValue(process.env[key] || '');
+          if (val && (!existingVal || isPlaceholderEnvValue(existingVal))) {
             process.env[key] = val;
           }
         }
@@ -40,7 +87,39 @@ function getServerEnv(key) {
   ensureEnvLoaded();
   const proc = typeof process !== 'undefined' && process.env ? process.env[key] : '';
   const meta = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env[key] : '';
-  return proc || meta || '';
+  return parseEnvValue(proc || meta || '');
+}
+
+function getResendApiKeyConfigError(apiKey) {
+  if (!apiKey) return 'RESEND_API_KEY missing from environment';
+
+  if (isPlaceholderEnvValue(apiKey)) {
+    return 'RESEND_API_KEY is still set to the example placeholder';
+  }
+
+  if (!apiKey.startsWith('re_')) {
+    return 'RESEND_API_KEY must start with "re_"';
+  }
+
+  if (apiKey.length < 20 || !/^[A-Za-z0-9_.-]+$/.test(apiKey)) {
+    return 'RESEND_API_KEY is malformed';
+  }
+
+  return '';
+}
+
+function getResendErrorMessage(error) {
+  const originalMessage = error?.message || JSON.stringify(error);
+  const statusCode = error?.statusCode || error?.status;
+
+  if (statusCode === 401 && /api key is invalid/i.test(originalMessage)) {
+    return [
+      'Resend rejected RESEND_API_KEY as invalid.',
+      'Create a new Resend API key with Sending Access or Full Access, update .env.local, and restart the dev server.'
+    ].join(' ');
+  }
+
+  return originalMessage;
 }
 
 /**
@@ -93,14 +172,15 @@ export async function sendTeamConfirmationEmails({
 
   const apiKey = getServerEnv('RESEND_API_KEY');
   const configuredFromEmail = getServerEnv('RESEND_FROM') || getServerEnv('RESEND_FROM_EMAIL');
+  const apiKeyConfigError = getResendApiKeyConfigError(apiKey);
 
-  if (!apiKey) {
-    console.error('❌ [EMAIL ERROR] RESEND_API_KEY is not configured in environment variables.');
+  if (apiKeyConfigError) {
+    console.error(`❌ [EMAIL ERROR] ${apiKeyConfigError}.`);
     return {
       success: false,
       allSuccess: false,
       skipped: true,
-      message: 'RESEND_API_KEY missing from environment',
+      message: apiKeyConfigError,
       results: []
     };
   }
@@ -204,7 +284,7 @@ export async function sendTeamConfirmationEmails({
 
       // Resend SDK returns { data, error }
       if (response.error) {
-        const errorMsg = response.error.message || JSON.stringify(response.error);
+        const errorMsg = getResendErrorMessage(response.error);
         console.error(`[EMAIL ERROR] Failed to send to ${member.email}`);
         console.error(`[EMAIL ERROR] ${errorMsg}`);
         emailResults.push({
