@@ -11,7 +11,7 @@
   let teamLeader = $state({
     name: '',
     admissionNumber: '',
-    classSection: '',
+    yearOfStudy: '',
     email: ''
   });
 
@@ -22,18 +22,21 @@
   let member2 = $state({
     name: '',
     admissionNumber: '',
+    yearOfStudy: '',
     email: ''
   });
 
   let member3 = $state({
     name: '',
     admissionNumber: '',
+    yearOfStudy: '',
     email: ''
   });
 
   let member4 = $state({
     name: '',
     admissionNumber: '',
+    yearOfStudy: '',
     email: ''
   });
 
@@ -63,8 +66,8 @@
       errors.leaderAdmission = 'Admission Number is required.';
       hasError = true;
     }
-    if (!teamLeader.classSection.trim()) {
-      errors.leaderClassSection = 'Class and Section is required.';
+    if (!teamLeader.yearOfStudy) {
+      errors.leaderYearOfStudy = 'Please select Year of Study.';
       hasError = true;
     }
     if (!teamLeader.email.trim()) {
@@ -84,6 +87,10 @@
       errors.m2Admission = 'Member 2 admission number is required.';
       hasError = true;
     }
+    if (!member2.yearOfStudy) {
+      errors.m2YearOfStudy = 'Please select Year of Study.';
+      hasError = true;
+    }
     if (!member2.email.trim()) {
       errors.m2Email = 'Member 2 email is required.';
       hasError = true;
@@ -99,6 +106,10 @@
     }
     if (!member3.admissionNumber.trim()) {
       errors.m3Admission = 'Member 3 admission number is required.';
+      hasError = true;
+    }
+    if (!member3.yearOfStudy) {
+      errors.m3YearOfStudy = 'Please select Year of Study.';
       hasError = true;
     }
     if (!member3.email.trim()) {
@@ -117,6 +128,10 @@
       }
       if (!member4.admissionNumber.trim()) {
         errors.m4Admission = 'Member 4 admission number is required.';
+        hasError = true;
+      }
+      if (!member4.yearOfStudy) {
+        errors.m4YearOfStudy = 'Please select Year of Study.';
         hasError = true;
       }
       if (!member4.email.trim()) {
@@ -186,18 +201,21 @@
           memberNumber: 1,
           name: teamLeader.name,
           admissionNumber: teamLeader.admissionNumber,
+          yearOfStudy: teamLeader.yearOfStudy,
           email: teamLeader.email
         },
         {
           memberNumber: 2,
           name: member2.name,
           admissionNumber: member2.admissionNumber,
+          yearOfStudy: member2.yearOfStudy,
           email: member2.email
         },
         {
           memberNumber: 3,
           name: member3.name,
           admissionNumber: member3.admissionNumber,
+          yearOfStudy: member3.yearOfStudy,
           email: member3.email
         }
       ];
@@ -207,6 +225,7 @@
           memberNumber: 4,
           name: member4.name,
           admissionNumber: member4.admissionNumber,
+          yearOfStudy: member4.yearOfStudy,
           email: member4.email
         });
       }
@@ -246,11 +265,11 @@
 
   // Reset form
   function handleReset() {
-    teamLeader = { name: '', admissionNumber: '', classSection: '', email: '' };
+    teamLeader = { name: '', admissionNumber: '', yearOfStudy: '', email: '' };
     teamSize = 3;
-    member2 = { name: '', admissionNumber: '', email: '' };
-    member3 = { name: '', admissionNumber: '', email: '' };
-    member4 = { name: '', admissionNumber: '', email: '' };
+    member2 = { name: '', admissionNumber: '', yearOfStudy: '', email: '' };
+    member3 = { name: '', admissionNumber: '', yearOfStudy: '', email: '' };
+    member4 = { name: '', admissionNumber: '', yearOfStudy: '', email: '' };
     fieldErrors = {};
     formError = '';
     isSuccess = false;
@@ -273,6 +292,7 @@
       eventTitle="Hackathon"
       teamSize={teamSize}
       leaderName={teamLeader.name}
+      yearOfStudy={teamLeader.yearOfStudy}
       onReset={handleReset}
     />
   {:else}
@@ -334,22 +354,24 @@
             {/if}
           </div>
 
-          <!-- Class and Section -->
+          <!-- Year of Study -->
           <div class="form-group">
-            <label class="form-label" for="hack-leader-class">
-              <span>Class and Section <span class="required-mark">*</span></span>
+            <label class="form-label" for="hack-leader-year">
+              <span>Year of Study <span class="required-mark">*</span></span>
             </label>
-            <input
-              id="hack-leader-class"
-              type="text"
-              class="form-input"
-              class:input-error={fieldErrors.leaderClassSection}
-              placeholder="e.g. CSE-B / 3rd Year"
-              bind:value={teamLeader.classSection}
+            <select
+              id="hack-leader-year"
+              class="form-input form-select"
+              class:input-error={fieldErrors.leaderYearOfStudy}
+              bind:value={teamLeader.yearOfStudy}
               disabled={isSubmitting}
-            />
-            {#if fieldErrors.leaderClassSection}
-              <span class="field-error-msg">{fieldErrors.leaderClassSection}</span>
+            >
+              <option value="" disabled selected>Select Year</option>
+              <option value="PG 1st Year">PG 1st Year</option>
+              <option value="PG 2nd Year">PG 2nd Year</option>
+            </select>
+            {#if fieldErrors.leaderYearOfStudy}
+              <span class="field-error-msg">{fieldErrors.leaderYearOfStudy}</span>
             {/if}
           </div>
 
@@ -415,9 +437,11 @@
           roleBadge="TEAM LEADER"
           name={teamLeader.name}
           admissionNumber={teamLeader.admissionNumber}
+          yearOfStudy={teamLeader.yearOfStudy}
           email={teamLeader.email}
           nameReadOnly={true}
           admissionReadOnly={true}
+          yearReadOnly={true}
           emailReadOnly={true}
           disabled={isSubmitting}
         />
@@ -429,10 +453,12 @@
           roleBadge="Required"
           bind:name={member2.name}
           bind:admissionNumber={member2.admissionNumber}
+          bind:yearOfStudy={member2.yearOfStudy}
           bind:email={member2.email}
           errors={{
             name: fieldErrors.m2Name,
             admissionNumber: fieldErrors.m2Admission,
+            yearOfStudy: fieldErrors.m2YearOfStudy,
             email: fieldErrors.m2Email
           }}
           disabled={isSubmitting}
@@ -445,10 +471,12 @@
           roleBadge="Required"
           bind:name={member3.name}
           bind:admissionNumber={member3.admissionNumber}
+          bind:yearOfStudy={member3.yearOfStudy}
           bind:email={member3.email}
           errors={{
             name: fieldErrors.m3Name,
             admissionNumber: fieldErrors.m3Admission,
+            yearOfStudy: fieldErrors.m3YearOfStudy,
             email: fieldErrors.m3Email
           }}
           disabled={isSubmitting}
@@ -462,10 +490,12 @@
             roleBadge="Required (4th Member)"
             bind:name={member4.name}
             bind:admissionNumber={member4.admissionNumber}
+            bind:yearOfStudy={member4.yearOfStudy}
             bind:email={member4.email}
             errors={{
               name: fieldErrors.m4Name,
               admissionNumber: fieldErrors.m4Admission,
+              yearOfStudy: fieldErrors.m4YearOfStudy,
               email: fieldErrors.m4Email
             }}
             disabled={isSubmitting}

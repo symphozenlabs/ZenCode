@@ -79,7 +79,7 @@ export async function checkDuplicateRegistration(collectionName, eventName, admi
       if (docAdmissions.has(adm)) {
         return {
           isDuplicate: true,
-          message: `This participant (Admission No: ${adm}) is already registered for this event.`
+          message: `Participant with Admission Number "${adm}" is already registered for ${eventName}.`
         };
       }
     }
@@ -89,7 +89,7 @@ export async function checkDuplicateRegistration(collectionName, eventName, admi
       if (docEmails.has(em)) {
         return {
           isDuplicate: true,
-          message: `This participant (Email: ${em}) is already registered for this event.`
+          message: `Participant with Email "${em}" is already registered for ${eventName}.`
         };
       }
     }
@@ -113,13 +113,15 @@ export async function registerHackathonTeam(registrationData) {
     teamLeader: {
       name: teamLeader.name.trim(),
       admissionNumber: teamLeader.admissionNumber.trim(),
-      classSection: teamLeader.classSection.trim(),
+      yearOfStudy: (teamLeader.yearOfStudy || teamLeader.classSection || '').trim(),
+      classSection: (teamLeader.yearOfStudy || teamLeader.classSection || '').trim(),
       email: teamLeader.email.trim()
     },
     members: members.map((m, index) => ({
       memberNumber: index + 1,
       name: m.name.trim(),
       admissionNumber: m.admissionNumber.trim(),
+      yearOfStudy: (m.yearOfStudy || '').trim(),
       email: m.email.trim()
     })),
     registeredAt: serverTimestamp(),
@@ -146,13 +148,15 @@ export async function registerPitchFestTeam(registrationData) {
     teamLeader: {
       name: teamLeader.name.trim(),
       admissionNumber: teamLeader.admissionNumber.trim(),
-      classSection: teamLeader.classSection.trim(),
+      yearOfStudy: (teamLeader.yearOfStudy || teamLeader.classSection || '').trim(),
+      classSection: (teamLeader.yearOfStudy || teamLeader.classSection || '').trim(),
       email: teamLeader.email.trim()
     },
     members: members.map((m, index) => ({
       memberNumber: index + 1,
       name: m.name.trim(),
       admissionNumber: m.admissionNumber.trim(),
+      yearOfStudy: (m.yearOfStudy || '').trim(),
       email: m.email.trim()
     })),
     registeredAt: serverTimestamp(),

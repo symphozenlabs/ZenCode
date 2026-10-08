@@ -24,6 +24,8 @@
   <!-- COMPACT BRANDED HEADER / HERO -->
   <header class="header-hero">
     <div class="header-inner">
+      <img src="/logo.png" alt="ZEN CODE Logo" class="brand-logo logo" />
+
       <div class="eyebrow-row">
         <span class="gold-dot"></span>
         <span class="eyebrow-text">ZEN CODE 2026</span>
@@ -147,7 +149,7 @@
   .header-hero {
     background-color: var(--forest-800);
     color: var(--text-white);
-    padding: 34px 24px 28px 24px;
+    padding: 22px 20px 18px 20px;
     border-bottom: 3px solid var(--forest-700);
   }
 
@@ -158,6 +160,15 @@
     display: flex;
     flex-direction: column;
     align-items: center;
+  }
+
+  .brand-logo,
+  .logo {
+    width: 80px;
+    height: auto;
+    object-fit: contain;
+    display: block;
+    margin: 0 auto 10px auto;
   }
 
   .eyebrow-row {
@@ -254,7 +265,7 @@
     width: calc(50% - 4px);
     background: var(--action-green);
     border-radius: 6px;
-    transition: transform 380ms cubic-bezier(0.4, 0, 0.2, 1);
+    transition: transform 450ms cubic-bezier(0.22, 1, 0.36, 1);
     box-shadow: 0 1px 3px rgba(24, 35, 26, 0.16);
   }
 
@@ -307,13 +318,13 @@
     width: 100%;
     overflow: hidden;
     position: relative;
-    transition: height 420ms cubic-bezier(0.4, 0, 0.2, 1);
+    transition: height 450ms cubic-bezier(0.22, 1, 0.36, 1);
   }
 
   .slider-track {
     display: flex;
     width: 200%;
-    transition: transform 450ms cubic-bezier(0.4, 0, 0.2, 1);
+    transition: transform 450ms cubic-bezier(0.22, 1, 0.36, 1);
     will-change: transform;
     align-items: flex-start;
   }
@@ -356,7 +367,12 @@
   /* Mobile Responsive */
   @media (max-width: 640px) {
     .header-hero {
-      padding: 26px 16px 22px 16px;
+      padding: 16px 14px 14px 14px;
+    }
+    .brand-logo,
+    .logo {
+      width: 72px;
+      margin-bottom: 8px;
     }
     .header-title {
       font-size: 28px;
@@ -369,6 +385,15 @@
     }
     .slider-pane {
       padding: 18px 14px;
+    }
+  }
+
+  /* Reduced Motion Support */
+  @media (prefers-reduced-motion: reduce) {
+    .slider-track,
+    .slider-viewport,
+    .switcher-indicator {
+      transition: none !important;
     }
   }
 </style>

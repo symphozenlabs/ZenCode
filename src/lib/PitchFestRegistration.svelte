@@ -14,7 +14,7 @@
   let member1 = $state({
     name: '',
     admissionNumber: '',
-    classSection: '',
+    yearOfStudy: '',
     email: ''
   });
 
@@ -22,6 +22,7 @@
   let member2 = $state({
     name: '',
     admissionNumber: '',
+    yearOfStudy: '',
     email: ''
   });
 
@@ -51,8 +52,8 @@
       errors.m1Admission = 'Admission Number is required.';
       hasError = true;
     }
-    if (!member1.classSection.trim()) {
-      errors.m1ClassSection = 'Class and Section is required.';
+    if (!member1.yearOfStudy) {
+      errors.m1YearOfStudy = 'Please select Year of Study.';
       hasError = true;
     }
     if (!member1.email.trim()) {
@@ -70,6 +71,10 @@
     }
     if (!member2.admissionNumber.trim()) {
       errors.m2Admission = 'Admission Number is required.';
+      hasError = true;
+    }
+    if (!member2.yearOfStudy) {
+      errors.m2YearOfStudy = 'Please select Year of Study.';
       hasError = true;
     }
     if (!member2.email.trim()) {
@@ -144,7 +149,7 @@
         teamLeader: {
           name: member1.name,
           admissionNumber: member1.admissionNumber,
-          classSection: member1.classSection,
+          yearOfStudy: member1.yearOfStudy,
           email: member1.email
         },
         members: [
@@ -152,12 +157,14 @@
             memberNumber: 1,
             name: member1.name,
             admissionNumber: member1.admissionNumber,
+            yearOfStudy: member1.yearOfStudy,
             email: member1.email
           },
           {
             memberNumber: 2,
             name: member2.name,
             admissionNumber: member2.admissionNumber,
+            yearOfStudy: member2.yearOfStudy,
             email: member2.email
           }
         ]
@@ -174,8 +181,8 @@
 
   // Reset form
   function handleReset() {
-    member1 = { name: '', admissionNumber: '', classSection: '', email: '' };
-    member2 = { name: '', admissionNumber: '', email: '' };
+    member1 = { name: '', admissionNumber: '', yearOfStudy: '', email: '' };
+    member2 = { name: '', admissionNumber: '', yearOfStudy: '', email: '' };
     fieldErrors = {};
     formError = '';
     isSuccess = false;
@@ -198,6 +205,7 @@
       eventTitle="Pitch Fest"
       teamSize={teamSize}
       leaderName={member1.name}
+      yearOfStudy={member1.yearOfStudy}
       onReset={handleReset}
     />
   {:else}
@@ -270,22 +278,24 @@
             {/if}
           </div>
 
-          <!-- Class and Section -->
+          <!-- Year of Study -->
           <div class="form-group">
-            <label class="form-label" for="pitch-m1-class">
-              <span>Class and Section <span class="required-mark">*</span></span>
+            <label class="form-label" for="pitch-m1-year">
+              <span>Year of Study <span class="required-mark">*</span></span>
             </label>
-            <input
-              id="pitch-m1-class"
-              type="text"
-              class="form-input"
-              class:input-error={fieldErrors.m1ClassSection}
-              placeholder="e.g. IT-A / 2nd Year"
-              bind:value={member1.classSection}
+            <select
+              id="pitch-m1-year"
+              class="form-input form-select"
+              class:input-error={fieldErrors.m1YearOfStudy}
+              bind:value={member1.yearOfStudy}
               disabled={isSubmitting}
-            />
-            {#if fieldErrors.m1ClassSection}
-              <span class="field-error-msg">{fieldErrors.m1ClassSection}</span>
+            >
+              <option value="" disabled selected>Select Year</option>
+              <option value="PG 1st Year">PG 1st Year</option>
+              <option value="PG 2nd Year">PG 2nd Year</option>
+            </select>
+            {#if fieldErrors.m1YearOfStudy}
+              <span class="field-error-msg">{fieldErrors.m1YearOfStudy}</span>
             {/if}
           </div>
 
@@ -323,10 +333,12 @@
           roleBadge="Mandatory"
           bind:name={member2.name}
           bind:admissionNumber={member2.admissionNumber}
+          bind:yearOfStudy={member2.yearOfStudy}
           bind:email={member2.email}
           errors={{
             name: fieldErrors.m2Name,
             admissionNumber: fieldErrors.m2Admission,
+            yearOfStudy: fieldErrors.m2YearOfStudy,
             email: fieldErrors.m2Email
           }}
           disabled={isSubmitting}
