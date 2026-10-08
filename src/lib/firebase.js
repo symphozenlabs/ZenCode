@@ -7,16 +7,20 @@ import {
   getDocs 
 } from 'firebase/firestore';
 
-// Read Firebase client configuration from Vite environment variables
+// Read Firebase client configuration safely across Vite dev, build, and Node contexts
+const metaEnv = (typeof import.meta !== 'undefined' && import.meta.env) ? import.meta.env : {};
+const procEnv = (typeof process !== 'undefined' && process.env) ? process.env : {};
+
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
+  apiKey: metaEnv.VITE_FIREBASE_API_KEY || procEnv.VITE_FIREBASE_API_KEY,
+  authDomain: metaEnv.VITE_FIREBASE_AUTH_DOMAIN || procEnv.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: metaEnv.VITE_FIREBASE_PROJECT_ID || procEnv.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: metaEnv.VITE_FIREBASE_STORAGE_BUCKET || procEnv.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: metaEnv.VITE_FIREBASE_MESSAGING_SENDER_ID || procEnv.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: metaEnv.VITE_FIREBASE_APP_ID || procEnv.VITE_FIREBASE_APP_ID,
+  measurementId: metaEnv.VITE_FIREBASE_MEASUREMENT_ID || procEnv.VITE_FIREBASE_MEASUREMENT_ID
 };
+
 
 // Initialize or reuse existing Firebase app
 export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
@@ -110,6 +114,9 @@ export async function registerHackathonTeam(registrationData) {
   const docPayload = {
     event: "Hackathon",
     teamSize: Number(teamSize),
+    qrGenerated: true,
+    qrVersion: 1,
+    confirmationEmailStatus: "pending",
     teamLeader: {
       name: teamLeader.name.trim(),
       admissionNumber: teamLeader.admissionNumber.trim(),
@@ -121,7 +128,8 @@ export async function registerHackathonTeam(registrationData) {
       memberNumber: index + 1,
       name: m.name.trim(),
       admissionNumber: m.admissionNumber.trim(),
-      yearOfStudy: (m.yearOfStudy || '').trim(),
+      yearOfStudy: (m.yearOfStudy || m.classSection || '').trim(),
+      classSection: (m.yearOfStudy || m.classSection || '').trim(),
       email: m.email.trim()
     })),
     registeredAt: serverTimestamp(),
@@ -145,6 +153,9 @@ export async function registerPitchFestTeam(registrationData) {
   const docPayload = {
     event: "Pitch Fest",
     teamSize: 2,
+    qrGenerated: true,
+    qrVersion: 1,
+    confirmationEmailStatus: "pending",
     teamLeader: {
       name: teamLeader.name.trim(),
       admissionNumber: teamLeader.admissionNumber.trim(),
@@ -156,7 +167,8 @@ export async function registerPitchFestTeam(registrationData) {
       memberNumber: index + 1,
       name: m.name.trim(),
       admissionNumber: m.admissionNumber.trim(),
-      yearOfStudy: (m.yearOfStudy || '').trim(),
+      yearOfStudy: (m.yearOfStudy || m.classSection || '').trim(),
+      classSection: (m.yearOfStudy || m.classSection || '').trim(),
       email: m.email.trim()
     })),
     registeredAt: serverTimestamp(),
@@ -167,3 +179,4 @@ export async function registerPitchFestTeam(registrationData) {
   const docRef = await addDoc(collection(db, COLLECTIONS.PITCH_FEST), docPayload);
   return docRef.id;
 }
+

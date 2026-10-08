@@ -145,7 +145,7 @@
       }
 
       // Save to Firestore
-      await registerPitchFestTeam({
+      const docId = await registerPitchFestTeam({
         teamLeader: {
           name: member1.name,
           admissionNumber: member1.admissionNumber,
@@ -170,7 +170,22 @@
         ]
       });
 
+      // Trigger server-side QR generation & email dispatch via Resend
+      try {
+        await fetch('/api/registration/send-confirmation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            collectionName: COLLECTIONS.PITCH_FEST,
+            teamId: docId
+          })
+        });
+      } catch (emailErr) {
+        console.error('Confirmation email send failed (registration saved):', emailErr);
+      }
+
       isSuccess = true;
+
     } catch (err) {
       console.error('Pitch Fest registration failed:', err);
       formError = 'Registration failed. Please try again.';
