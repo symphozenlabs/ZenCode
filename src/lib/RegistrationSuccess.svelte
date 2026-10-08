@@ -7,149 +7,111 @@
   } = $props();
 </script>
 
-<div class="success-card">
-  <div class="success-icon-badge">
-    <svg class="check-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+<div class="success-box" role="status" aria-live="polite">
+  <div class="success-icon-wrap">
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
       <polyline points="20 6 9 17 4 12"></polyline>
     </svg>
   </div>
 
-  <span class="success-status-pill">✓ Registration Successful!</span>
+  <div class="gold-accent-line"></div>
 
-  <h3 class="success-brand">ZEN CODE 2026</h3>
-  <h4 class="success-event">{eventTitle} Registration Completed</h4>
+  <h3 class="success-title">REGISTRATION SUCCESSFUL</h3>
 
-  <p class="success-message">
-    Your team registration has been recorded successfully in the system.
+  <p class="success-desc">
+    Your {eventTitle} registration has been recorded for <strong>ZEN CODE 2026</strong>.
   </p>
 
-  <div class="success-summary">
-    <div class="summary-item">
+  <div class="summary-card">
+    <div class="summary-row">
       <span class="summary-label">Event:</span>
-      <span class="summary-val">{eventTitle}</span>
+      <span class="summary-value">{eventTitle}</span>
     </div>
     {#if leaderName}
-      <div class="summary-item">
+      <div class="summary-row">
         <span class="summary-label">Team Leader:</span>
-        <span class="summary-val">{leaderName}</span>
+        <span class="summary-value">{leaderName}</span>
       </div>
     {/if}
-    <div class="summary-item">
-      <span class="summary-label">Team Members:</span>
-      <span class="summary-val summary-highlight">{teamSize} Members</span>
+    <div class="summary-row">
+      <span class="summary-label">Team Size:</span>
+      <span class="summary-value green-badge">{teamSize} Members</span>
+    </div>
+    <div class="summary-row">
+      <span class="summary-label">Status:</span>
+      <span class="summary-value status-badge">Recorded</span>
     </div>
   </div>
 
-  <button type="button" class="reset-button" onclick={onReset}>
-    <svg class="reset-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path>
-      <path d="M21 3v5h-5"></path>
-      <path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path>
-      <path d="M3 21v-5h5"></path>
-    </svg>
+  <button type="button" class="reset-btn" onclick={onReset}>
     REGISTER ANOTHER TEAM
   </button>
 </div>
 
 <style>
-  .success-card {
+  .success-box {
     display: flex;
     flex-direction: column;
     align-items: center;
     text-align: center;
-    padding: 36px 24px;
+    padding: 32px 20px;
     background: #ffffff;
-    border-radius: var(--radius-lg);
-    border: 1.5px solid var(--primary-cyan-border);
-    box-shadow: 0 12px 28px -6px rgba(6, 182, 212, 0.12);
-    animation: fadeInScale 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    border-radius: var(--radius-card);
   }
 
-  @keyframes fadeInScale {
-    from {
-      opacity: 0;
-      transform: scale(0.96);
-    }
-    to {
-      opacity: 1;
-      transform: scale(1);
-    }
-  }
-
-  .success-icon-badge {
-    width: 64px;
-    height: 64px;
+  .success-icon-wrap {
+    width: 48px;
+    height: 48px;
     border-radius: 50%;
-    background: linear-gradient(135deg, var(--primary-cyan), var(--secondary-mint-dark));
+    background: var(--light-green);
+    color: var(--forest-800);
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #ffffff;
-    margin-bottom: 16px;
-    box-shadow: 0 6px 16px rgba(6, 182, 212, 0.28);
-  }
-
-  .check-icon {
-    width: 32px;
-    height: 32px;
-  }
-
-  .success-status-pill {
-    display: inline-block;
-    font-size: 0.82rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--secondary-mint-dark);
-    background: var(--secondary-mint);
-    padding: 4px 12px;
-    border-radius: var(--radius-full);
     margin-bottom: 12px;
   }
 
-  .success-brand {
-    font-size: 1.15rem;
-    font-weight: 800;
-    letter-spacing: 0.08em;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    margin-bottom: 4px;
+  .gold-accent-line {
+    width: 36px;
+    height: 3px;
+    background: var(--accent-gold);
+    border-radius: 2px;
+    margin-bottom: 12px;
   }
 
-  .success-event {
-    font-size: 1.35rem;
+  .success-title {
+    font-size: 18px;
     font-weight: 700;
-    color: var(--text-primary);
-    margin-bottom: 10px;
+    color: var(--forest-800);
+    letter-spacing: 0.04em;
+    margin-bottom: 8px;
   }
 
-  .success-message {
-    font-size: 0.94rem;
-    color: var(--text-secondary);
-    max-width: 380px;
-    line-height: 1.5;
-    margin-bottom: 24px;
-  }
-
-  .success-summary {
-    width: 100%;
+  .success-desc {
+    font-size: 14px;
+    color: var(--text-muted);
     max-width: 360px;
-    background: var(--base-bg-subtle);
-    border: 1px solid var(--base-border);
-    border-radius: var(--radius-md);
-    padding: 14px 18px;
-    margin-bottom: 28px;
-    text-align: left;
+    line-height: 1.5;
+    margin-bottom: 20px;
+  }
+
+  .summary-card {
+    width: 100%;
+    background: var(--light-green-subtle);
+    border: 1px solid var(--border-card);
+    border-radius: var(--radius-input);
+    padding: 12px 16px;
+    margin-bottom: 24px;
     display: flex;
     flex-direction: column;
     gap: 8px;
   }
 
-  .summary-item {
+  .summary-row {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    font-size: 0.9rem;
+    font-size: 13px;
   }
 
   .summary-label {
@@ -157,46 +119,40 @@
     font-weight: 500;
   }
 
-  .summary-val {
+  .summary-value {
     color: var(--text-primary);
     font-weight: 600;
   }
 
-  .summary-highlight {
-    color: var(--primary-cyan-dark);
+  .green-badge {
+    color: var(--forest-800);
     font-weight: 700;
   }
 
-  .reset-button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    padding: 12px 24px;
-    font-size: 0.9rem;
-    font-weight: 700;
-    letter-spacing: 0.03em;
-    color: #ffffff;
-    background: linear-gradient(135deg, var(--primary-cyan), var(--primary-cyan-hover));
+  .status-badge {
+    background: var(--light-green);
+    color: var(--forest-800);
+    padding: 2px 8px;
+    border-radius: var(--radius-badge);
+    font-size: 12px;
+  }
+
+  .reset-btn {
+    width: 100%;
+    height: 44px;
+    padding: 0 16px;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--text-white);
+    background: var(--action-green);
     border: none;
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-btn);
     cursor: pointer;
-    box-shadow: 0 4px 12px rgba(6, 182, 212, 0.25);
-    transition: all 0.2s ease;
+    transition: background 150ms ease;
   }
 
-  .reset-button:hover {
-    background: linear-gradient(135deg, var(--primary-cyan-hover), var(--primary-cyan-dark));
-    transform: translateY(-1px);
-    box-shadow: 0 6px 16px rgba(6, 182, 212, 0.35);
-  }
-
-  .reset-button:active {
-    transform: translateY(0);
-  }
-
-  .reset-icon {
-    width: 16px;
-    height: 16px;
+  .reset-btn:hover {
+    background: var(--action-green-hover);
   }
 </style>
