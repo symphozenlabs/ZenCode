@@ -73,7 +73,7 @@
 								<item.icon class="size-4 {active ? 'text-sidebar-primary' : ''}" />
 								<span class="flex-1">{item.label}</span>
 								{#if 'badge' in item && item.badge}
-									<span class="min-w-5 rounded-md bg-attention px-1.5 text-center text-[11px] leading-5 font-semibold text-white tabular" aria-label="{item.badge} pending">{item.badge}</span>
+									<span class="min-w-5 rounded-md bg-attention px-1.5 text-center text-[11px] leading-5 font-semibold text-white tabular" aria-label="{item.badge} new">{item.badge}</span>
 								{/if}
 							</a>
 						</li>

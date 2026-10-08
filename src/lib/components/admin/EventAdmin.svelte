@@ -27,8 +27,8 @@
 	const list = $derived(registrations.items.filter((r) => r.event === eventId));
 	const stats = $derived({
 		total: list.length,
-		pending: list.filter((r) => r.status === 'pending').length,
 		approved: list.filter((r) => r.status === 'approved').length,
+		rejected: list.filter((r) => r.status === 'rejected').length,
 		people: list.filter((r) => r.status === 'approved').reduce((n, r) => n + r.teamSize, 0)
 	});
 	const loading = $derived(registrations.status !== 'ready');
@@ -120,9 +120,9 @@
 
 <div class="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4">
 	<StatCard label="Registrations" value={stats.total} {loading} />
-	<StatCard label="Pending" value={stats.pending} {loading} />
-	<StatCard label="Approved entries" value={stats.approved} {loading} />
-	<StatCard label="Approved people" value={stats.people} helper="All members of approved teams" {loading} />
+	<StatCard label="Active teams" value={stats.approved} {loading} />
+	<StatCard label="Rejected" value={stats.rejected} {loading} />
+	<StatCard label="Participants" value={stats.people} helper="Members of active teams" {loading} />
 </div>
 
 <div class="mb-4 flex gap-1 border-b border-border" role="tablist">

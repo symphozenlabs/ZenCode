@@ -71,7 +71,7 @@ function payload(event, size) {
 			email: members[0].email
 		},
 		members,
-		status: 'pending',
+		status: 'approved',
 		registeredAt: serverTimestamp(),
 		_searchAdmissionNumbers: members.map((m) => m.admissionNumber.toUpperCase()),
 		_searchEmails: members.map((m) => m.email.toLowerCase())
@@ -111,18 +111,18 @@ await step('Admin reads both collections', async () => {
 		total += snap.size;
 		const d = snap.docs.find((x) => x.id === id)?.data();
 		if (!d) throw new Error(`${id} missing from ${col}`);
-		if (!d.registeredAt?.toMillis || d.status !== 'pending' || d.members.length !== d.teamSize) {
+		if (!d.registeredAt?.toMillis || d.status !== 'approved' || d.members.length !== d.teamSize) {
 			throw new Error(`${id}: stored fields do not match`);
 		}
 	}
 	ok(`Admin listener query returns ${total} team(s); new entries have timestamp, status and members`);
 });
 
-await step('Admin approves a team', async () => {
+await step('Admin rejects a team', async () => {
 	const [col, id] = created[0];
-	await updateDoc(doc(db, col, id), { status: 'approved', reviewedBy: ADMIN_EMAIL, reviewedAt: Date.now() });
-	if ((await getDoc(doc(db, col, id))).data().status !== 'approved') throw new Error('status did not change');
-	ok('Status update persisted (pending → approved)');
+	await updateDoc(doc(db, col, id), { status: 'rejected', reviewedBy: ADMIN_EMAIL, reviewedAt: Date.now() });
+	if ((await getDoc(doc(db, col, id))).data().status !== 'rejected') throw new Error('status did not change');
+	ok('Status update persisted (approved → rejected)');
 });
 
 await step('Admin edits a team', async () => {

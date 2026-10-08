@@ -6,8 +6,7 @@ import {
 	signOut,
 	type User
 } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
-import { auth, db } from '$lib/firebase/client';
+import { auth } from '$lib/firebase/auth';
 import { ADMIN_EMAIL, ADMIN_PASSWORD } from '$lib/config/admin';
 
 export type AuthStatus = 'loading' | 'signed-out' | 'not-admin' | 'admin' | 'unconfigured';
@@ -39,6 +38,11 @@ class AdminAuth {
 	async #isAdmin(user: User) {
 		if (user.email?.toLowerCase() === ADMIN_EMAIL) return true;
 		try {
+			// Loaded on demand: the hard-coded admin never needs Firestore to sign in.
+			const [{ doc, getDoc }, { db }] = await Promise.all([
+				import('firebase/firestore'),
+				import('$lib/firebase/client')
+			]);
 			const snap = await getDoc(doc(db(), 'admins', user.uid));
 			return snap.exists();
 		} catch {

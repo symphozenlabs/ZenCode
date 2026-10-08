@@ -75,7 +75,7 @@
 		{:else}
 			<div class="rounded-lg border border-dashed border-forest-700/30 p-12 text-center">
 				<p class="font-display text-2xl text-forest-950">The schedule will be announced soon.</p>
-				<p class="mt-2 text-muted-foreground">Approved teams will receive timings ahead of the event.</p>
+				<p class="mt-2 text-muted-foreground">Registered teams will receive timings ahead of the event.</p>
 			</div>
 		{/if}
 	</div>

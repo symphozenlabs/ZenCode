@@ -2,7 +2,6 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { adminAuth } from '$lib/stores/admin-auth.svelte';
-	import AdminShell from '$lib/components/admin/AdminShell.svelte';
 	import Spinner from '$lib/components/ui/Spinner.svelte';
 
 	let { children } = $props();
@@ -10,6 +9,10 @@
 	const isLogin = $derived(page.url.pathname === '/admin/login');
 
 	adminAuth.start();
+
+	// Loaded on demand so the login page doesn't download the admin shell
+	// (and the Firestore SDK it pulls in).
+	const loadShell = () => import('$lib/components/admin/AdminShell.svelte');
 
 	// Route protection: anyone who isn't a verified admin is sent to login.
 	$effect(() => {
@@ -29,7 +32,13 @@
 {#if isLogin}
 	{@render children()}
 {:else if adminAuth.status === 'admin'}
-	<AdminShell>{@render children()}</AdminShell>
+	{#await loadShell()}
+		<div class="grid min-h-dvh place-items-center bg-background text-muted-foreground">
+			<div class="flex items-center gap-3 text-sm"><Spinner /> Loading…</div>
+		</div>
+	{:then { default: AdminShell }}
+		<AdminShell>{@render children()}</AdminShell>
+	{/await}
 {:else}
 	<div class="grid min-h-dvh place-items-center bg-background text-muted-foreground">
 		<div class="flex items-center gap-3 text-sm"><Spinner /> Checking access…</div>

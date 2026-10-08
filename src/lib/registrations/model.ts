@@ -26,7 +26,8 @@ export const TEAM_SIZES: Record<EventId, number[]> = {
 	'pitch-fest': [2]
 };
 
-export const REGISTRATION_STATUSES = ['pending', 'approved', 'rejected'] as const;
+/** Teams are approved automatically on registration; admins can only reject (or restore). */
+export const REGISTRATION_STATUSES = ['approved', 'rejected'] as const;
 export type RegistrationStatus = (typeof REGISTRATION_STATUSES)[number];
 
 export interface TeamLeader {
@@ -52,7 +53,7 @@ export interface Registration {
 	teamLeader: TeamLeader;
 	/** All members including the leader (memberNumber 1) */
 	members: TeamMember[];
-	/** Missing on older docs → treated as pending */
+	/** Anything other than 'rejected' (incl. older 'pending'/missing) → approved */
 	status: RegistrationStatus;
 	/** ms since epoch */
 	createdAt: number;

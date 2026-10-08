@@ -10,7 +10,6 @@
 		ArrowDown,
 		Download,
 		Pencil,
-		Check,
 		X,
 		RotateCcw,
 		Trash2,
@@ -61,7 +60,6 @@
 
 	const counts = $derived({
 		all: scoped.length,
-		pending: scoped.filter((r) => r.status === 'pending').length,
 		approved: scoped.filter((r) => r.status === 'approved').length,
 		rejected: scoped.filter((r) => r.status === 'rejected').length
 	});
@@ -134,7 +132,7 @@
 		busy = { ...busy, [r.id]: status };
 		try {
 			await registrations.setStatus(r, status);
-			notify(`${r.teamLeader.name}'s team marked ${status}`);
+			notify(status === 'rejected' ? `${r.teamLeader.name}'s team rejected` : `${r.teamLeader.name}'s team restored`);
 		} catch {
 			notify('Unable to update status. Try again.', 'error');
 		} finally {
@@ -176,7 +174,6 @@
 
 	const statusTabs: { id: StatusFilter; label: string }[] = [
 		{ id: 'all', label: 'All' },
-		{ id: 'pending', label: 'Pending' },
 		{ id: 'approved', label: 'Approved' },
 		{ id: 'rejected', label: 'Rejected' }
 	];
@@ -255,7 +252,7 @@
 					{statusFilter === t.id ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				{t.label}
-				<span class="rounded bg-muted px-1.5 text-[11px] leading-5 tabular {t.id === 'pending' && counts.pending ? 'bg-attention/10 text-attention' : ''}">{counts[t.id]}</span>
+				<span class="rounded bg-muted px-1.5 text-[11px] leading-5 tabular">{counts[t.id]}</span>
 			</button>
 		{/each}
 	</div>
@@ -321,12 +318,11 @@
 							<td class="hidden px-3 py-2.5 text-muted-foreground tabular sm:table-cell">{formatTimestamp(r.createdAt)}</td>
 							<td class="px-3 py-2.5">
 								<div class="flex justify-end gap-1">
-									{#if r.status !== 'approved'}
-										<Button size="sm" variant="ghost" class="text-emerald-700 hover:bg-emerald-50" loading={rowBusy === 'approved'} disabled={!!rowBusy} onclick={() => setStatus(r, 'approved')} aria-label="Approve {r.teamLeader.name}'s team">
-											{#if rowBusy !== 'approved'}<Check class="size-4" />{/if}<span class="hidden xl:inline">Approve</span>
+									{#if r.status === 'rejected'}
+										<Button size="sm" variant="ghost" loading={rowBusy === 'approved'} disabled={!!rowBusy} onclick={() => setStatus(r, 'approved')} aria-label="Restore {r.teamLeader.name}'s team">
+											{#if rowBusy !== 'approved'}<RotateCcw class="size-4" />{/if}<span class="hidden xl:inline">Restore</span>
 										</Button>
-									{/if}
-									{#if r.status !== 'rejected'}
+									{:else}
 										<Button size="sm" variant="ghost" class="text-destructive hover:bg-red-50" loading={rowBusy === 'rejected'} disabled={!!rowBusy} onclick={() => setStatus(r, 'rejected')} aria-label="Reject {r.teamLeader.name}'s team">
 											{#if rowBusy !== 'rejected'}<X class="size-4" />{/if}<span class="hidden xl:inline">Reject</span>
 										</Button>
@@ -361,14 +357,10 @@
 											</div>
 											<div class="mt-6 flex flex-wrap items-center gap-2 border-t border-border pt-4">
 												<Button size="sm" variant="outline" onclick={() => (editing = r)}><Pencil class="size-3.5" /> Edit</Button>
-												{#if r.status !== 'approved'}
-													<Button size="sm" loading={rowBusy === 'approved'} disabled={!!rowBusy} onclick={() => setStatus(r, 'approved')}><Check class="size-3.5" /> Approve</Button>
-												{/if}
-												{#if r.status !== 'rejected'}
+												{#if r.status === 'rejected'}
+													<Button size="sm" variant="outline" loading={rowBusy === 'approved'} disabled={!!rowBusy} onclick={() => setStatus(r, 'approved')}><RotateCcw class="size-3.5" /> Restore</Button>
+												{:else}
 													<Button size="sm" variant="outline" class="text-destructive" loading={rowBusy === 'rejected'} disabled={!!rowBusy} onclick={() => setStatus(r, 'rejected')}><X class="size-3.5" /> Reject</Button>
-												{/if}
-												{#if r.status !== 'pending'}
-													<Button size="sm" variant="ghost" loading={rowBusy === 'pending'} disabled={!!rowBusy} onclick={() => setStatus(r, 'pending')}><RotateCcw class="size-3.5" /> Back to pending</Button>
 												{/if}
 												<Button size="sm" variant="ghost" class="ml-auto text-destructive hover:bg-red-50" onclick={() => (deleting = r)}><Trash2 class="size-3.5" /> Delete</Button>
 											</div>

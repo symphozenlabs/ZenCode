@@ -4,7 +4,7 @@ rules_version = '2';
 // - Admins are the hard-coded admin@gmail.com account (src/lib/config/admin.ts),
 //   or users with a document at /admins/{uid} (created via `npm run grant-admin`).
 // - Registrations live in one collection per event. The public form may only
-//   create a valid, pending registration; admins review, edit and delete them.
+//   create a valid registration (auto-approved); admins can reject, edit and delete.
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() {
@@ -27,9 +27,9 @@ service cloud.firestore {
         && leader.email is string && leader.email.size() > 0;
     }
 
-    // New registrations always start as pending (older docs had no status).
-    function startsPending(data) {
-      return !('status' in data) || data.status == 'pending';
+    // New registrations are auto-approved (older docs had no status).
+    function startsApproved(data) {
+      return !('status' in data) || data.status == 'approved';
     }
 
     // Hackathon: teams of 3 or 4 (members includes the leader)
@@ -40,7 +40,7 @@ service cloud.firestore {
         && data.members is list
         && data.members.size() == data.teamSize
         && data.registeredAt == request.time
-        && startsPending(data);
+        && startsApproved(data);
     }
 
     // Pitch Fest: teams of exactly 2
@@ -51,7 +51,7 @@ service cloud.firestore {
         && data.members is list
         && data.members.size() == 2
         && data.registeredAt == request.time
-        && startsPending(data);
+        && startsApproved(data);
     }
 
     // Admin edits must keep the event and original registration time.
@@ -59,7 +59,7 @@ service cloud.firestore {
       return request.resource.data.event == resource.data.event
         && request.resource.data.registeredAt == resource.data.registeredAt
         && (!('status' in request.resource.data)
-            || request.resource.data.status in ['pending', 'approved', 'rejected']);
+            || request.resource.data.status in ['approved', 'rejected']);
     }
 
     match /admins/{uid} {

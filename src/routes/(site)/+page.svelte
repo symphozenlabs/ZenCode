@@ -22,7 +22,7 @@
 
 	const steps = [
 		{ icon: UserPlus, title: 'Register', body: 'Pick an event and sign up with your team in a few minutes.' },
-		{ icon: BadgeCheck, title: 'Get approved', body: 'Organisers review every entry. Keep your registration ID handy.' },
+		{ icon: BadgeCheck, title: "You're in", body: 'Your team is confirmed as soon as the form is submitted.' },
 		{ icon: Hammer, title: 'Build', body: 'Show up, plug in and turn the idea into something that works.' },
 		{ icon: Mic, title: 'Demo & pitch', body: 'Take the stage, show what you made and answer the panel.' }
 	];
@@ -221,7 +221,7 @@
 			{:else}
 				<div class="rounded-lg border border-dashed border-forest-700/30 p-10 text-center">
 					<p class="font-display text-xl text-forest-950">The schedule will be announced soon.</p>
-					<p class="mt-2 text-muted-foreground">Register now and we'll share timings with approved teams.</p>
+					<p class="mt-2 text-muted-foreground">Register now and we'll share timings with registered teams.</p>
 				</div>
 			{/if}
 		</div>

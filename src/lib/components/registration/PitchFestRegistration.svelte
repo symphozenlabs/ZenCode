@@ -318,6 +318,7 @@
         </div>
 
         <TeamMemberFields
+          idPrefix="pitch-m"
           memberNumber={2}
           title="MEMBER 2"
           roleBadge="Mandatory"

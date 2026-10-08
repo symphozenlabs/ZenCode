@@ -4,7 +4,6 @@ import { adminAuth } from './admin-auth.svelte';
 import { EVENT_IDS, type EventId } from '$lib/config/site';
 import {
 	COLLECTION_BY_EVENT,
-	REGISTRATION_STATUSES,
 	searchFields,
 	type Registration,
 	type RegistrationStatus,
@@ -30,7 +29,7 @@ function fromDoc(id: string, event: EventId, d: DocumentData): Registration {
 				email: str(m?.email)
 			}))
 		: [];
-	const status = (REGISTRATION_STATUSES as readonly string[]).includes(d.status) ? (d.status as RegistrationStatus) : 'pending';
+	const status: RegistrationStatus = d.status === 'rejected' ? 'rejected' : 'approved';
 	return {
 		id,
 		event,
@@ -65,7 +64,6 @@ class RegistrationsStore {
 	status = $derived<'loading' | 'ready' | 'error'>(
 		this.#error ? 'error' : EVENT_IDS.every((id) => this.#ready[id]) ? 'ready' : 'loading'
 	);
-	pending = $derived(this.items.filter((r) => r.status === 'pending').length);
 
 	subscribe() {
 		this.#refs++;

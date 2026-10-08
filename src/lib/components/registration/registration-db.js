@@ -95,7 +95,7 @@ function buildPayload(event, teamSize, teamLeader, members) {
       email: teamLeader.email.trim()
     },
     members: cleanMembers,
-    status: 'pending',
+    status: 'approved', // auto-approved; admins can reject
     registeredAt: serverTimestamp(),
     ...searchFields(cleanMembers)
   };

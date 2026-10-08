@@ -1,6 +1,7 @@
 <script>
   let {
     memberNumber = 1,
+    idPrefix = 'm',
     title = '',
     roleBadge = '',
     name = $bindable(''),
@@ -28,14 +29,14 @@
   <div class="member-fields-grid">
     <!-- Name Field -->
     <div class="form-group">
-      <label class="form-label" for={`m${memberNumber}-name`}>
+      <label class="form-label" for={`${idPrefix}${memberNumber}-name`}>
         <span>Name <span class="required-mark">*</span></span>
         {#if nameReadOnly}
           <span class="auto-badge">Auto</span>
         {/if}
       </label>
       <input
-        id={`m${memberNumber}-name`}
+        id={`${idPrefix}${memberNumber}-name`}
         type="text"
         class="form-input"
         class:input-error={errors.name}
@@ -51,14 +52,14 @@
 
     <!-- Admission Number Field -->
     <div class="form-group">
-      <label class="form-label" for={`m${memberNumber}-adm`}>
+      <label class="form-label" for={`${idPrefix}${memberNumber}-adm`}>
         <span>Admission Number <span class="required-mark">*</span></span>
         {#if admissionReadOnly}
           <span class="auto-badge">Auto</span>
         {/if}
       </label>
       <input
-        id={`m${memberNumber}-adm`}
+        id={`${idPrefix}${memberNumber}-adm`}
         type="text"
         class="form-input"
         class:input-error={errors.admissionNumber}
@@ -74,14 +75,14 @@
 
     <!-- Email ID Field -->
     <div class="form-group full-width">
-      <label class="form-label" for={`m${memberNumber}-email`}>
+      <label class="form-label" for={`${idPrefix}${memberNumber}-email`}>
         <span>Email ID <span class="required-mark">*</span></span>
         {#if emailReadOnly}
           <span class="auto-badge">Auto</span>
         {/if}
       </label>
       <input
-        id={`m${memberNumber}-email`}
+        id={`${idPrefix}${memberNumber}-email`}
         type="email"
         class="form-input"
         class:input-error={errors.email}
