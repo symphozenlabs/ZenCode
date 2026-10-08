@@ -21,24 +21,16 @@
 </script>
 
 <div class="page-container">
-  <!-- COMPACT BRANDED HEADER / HERO -->
+  <!-- Minimal branded header -->
   <header class="header-hero">
     <div class="header-inner">
-      <img src="/logo.png" alt="ZEN CODE Logo" class="brand-logo logo" />
+      <img src="/logo.png" alt="ZEN CODE Logo" class="brand-logo" />
 
-      <div class="eyebrow-row">
-        <span class="gold-dot"></span>
+      <div class="header-copy">
         <span class="eyebrow-text">ZEN CODE 2026</span>
-        <span class="gold-dot"></span>
+        <h1 class="header-title">Hackathon &amp; Pitch Fest</h1>
+        <p class="header-desc">Register your team and be part of ZEN CODE 2026.</p>
       </div>
-
-      <h1 class="header-title">Hackathon &amp; Pitch Fest</h1>
-
-      <div class="gold-accent-rule"></div>
-
-      <p class="header-desc">
-        Register your team and be part of ZEN CODE 2026.
-      </p>
     </div>
   </header>
 
@@ -145,76 +137,60 @@
     overflow-x: hidden;
   }
 
-  /* Compact Branded Header (Forest 800) */
+  /* Minimal Branded Header (Forest 800) */
   .header-hero {
     background-color: var(--forest-800);
     color: var(--text-white);
-    padding: 22px 20px 18px 20px;
-    border-bottom: 3px solid var(--forest-700);
+    padding: 14px 20px;
+    border-bottom: 1px solid rgba(240, 196, 92, 0.38);
   }
 
   .header-inner {
     max-width: 1160px;
     margin: 0 auto;
-    text-align: center;
     display: flex;
-    flex-direction: column;
     align-items: center;
+    justify-content: center;
+    gap: 14px;
   }
 
-  .brand-logo,
-  .logo {
-    width: 80px;
+  .brand-logo {
+    width: 46px;
     height: auto;
     object-fit: contain;
+    flex: 0 0 auto;
     display: block;
-    margin: 0 auto 10px auto;
   }
 
-  .eyebrow-row {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 6px;
-  }
-
-  .gold-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background-color: var(--accent-gold);
+  .header-copy {
+    min-width: 0;
+    text-align: left;
   }
 
   .eyebrow-text {
-    font-size: 13px;
+    display: block;
+    font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0.12em;
-    color: #d1e2cb;
+    letter-spacing: 0.14em;
+    color: var(--accent-gold);
     text-transform: uppercase;
+    line-height: 1.2;
+    margin-bottom: 2px;
   }
 
   .header-title {
-    font-size: clamp(28px, 4.2vw, 40px);
+    font-size: clamp(22px, 3vw, 30px);
     font-weight: 700;
     color: var(--text-white);
-    letter-spacing: -0.02em;
-    line-height: 1.15;
-    margin-bottom: 10px;
-  }
-
-  .gold-accent-rule {
-    width: 44px;
-    height: 3px;
-    background-color: var(--accent-gold);
-    border-radius: 2px;
-    margin-bottom: 12px;
+    letter-spacing: 0;
+    line-height: 1.1;
   }
 
   .header-desc {
-    font-size: 15px;
+    font-size: 13px;
     color: #e1ede0;
-    max-width: 540px;
-    line-height: 1.5;
+    line-height: 1.35;
+    margin-top: 4px;
   }
 
   /* Main Registration Area: ONE Single Registration Container */
@@ -367,15 +343,20 @@
   /* Mobile Responsive */
   @media (max-width: 640px) {
     .header-hero {
-      padding: 16px 14px 14px 14px;
+      padding: 12px 14px;
     }
-    .brand-logo,
-    .logo {
-      width: 72px;
-      margin-bottom: 8px;
+    .header-inner {
+      justify-content: flex-start;
+      gap: 10px;
+    }
+    .brand-logo {
+      width: 38px;
     }
     .header-title {
-      font-size: 28px;
+      font-size: 22px;
+    }
+    .header-desc {
+      font-size: 12px;
     }
     .main-content {
       padding: 16px 12px 40px 12px;
