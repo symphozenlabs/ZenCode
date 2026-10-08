@@ -3,6 +3,7 @@ import path from 'node:path';
 import { Resend } from 'resend';
 import { generateTeamQRCode } from './qr.js';
 import { buildRegistrationPassEmailHtml } from './emailTemplate.js';
+import { buildRegistrationPassPdfBase64 } from './pdfPass.js';
 
 let envLoaded = false;
 
@@ -122,6 +123,14 @@ function getResendErrorMessage(error) {
   return originalMessage;
 }
 
+function sanitizeAttachmentName(value) {
+  return String(value || '')
+    .trim()
+    .replace(/[^A-Za-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60) || 'registration-pass';
+}
+
 /**
  * Validates and sanitizes the sender address for Resend.
  * Resend free tier prohibits unverified @gmail.com sender addresses.
@@ -164,7 +173,7 @@ export async function sendTeamConfirmationEmails({
   event,
   teamLeader,
   members = [],
-  baseUrl = 'http://localhost:5173'
+  baseUrl = 'https://zencode.symphozen.com'
 }) {
   if (!teamId) {
     throw new Error('teamId is required for generating registration passes');
@@ -268,6 +277,15 @@ export async function sendTeamConfirmationEmails({
       qrImageUrl: hostedQrUrl
     });
 
+    const passPdfContent = buildRegistrationPassPdfBase64({
+      member,
+      eventName,
+      teamName,
+      teamId,
+      checkInUrl
+    });
+    const passPdfFileName = `${sanitizeAttachmentName(`${eventName}-${member.admissionNumber || member.name || teamId}`)}.pdf`;
+
     try {
       const response = await resend.emails.send({
         from: fromAddress,
@@ -275,6 +293,10 @@ export async function sendTeamConfirmationEmails({
         subject: `🎟️ Your ZEN CODE 2026 Check-in Pass (${eventName})`,
         html: htmlContent,
         attachments: [
+          {
+            filename: passPdfFileName,
+            content: passPdfContent
+          },
           {
             filename: 'team-checkin-qr.png',
             content: base64Content
