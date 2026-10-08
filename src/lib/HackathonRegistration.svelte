@@ -229,13 +229,28 @@
       }
 
       // Save to Firestore
-      await registerHackathonTeam({
+      const docId = await registerHackathonTeam({
         teamSize,
         teamLeader,
         members: membersList
       });
 
+      // Trigger server-side QR generation & email dispatch via Resend
+      try {
+        await fetch('/api/registration/send-confirmation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            collectionName: COLLECTIONS.HACKATHON,
+            teamId: docId
+          })
+        });
+      } catch (emailErr) {
+        console.error('Confirmation email send failed (registration saved):', emailErr);
+      }
+
       isSuccess = true;
+
     } catch (err) {
       console.error('Hackathon registration failed:', err);
       formError = 'Registration failed. Please try again.';
