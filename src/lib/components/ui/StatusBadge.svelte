@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { RegistrationStatus } from '$lib/validation/registration';
+	import type { RegistrationStatus } from '$lib/registrations/model';
 
 	let { status }: { status: RegistrationStatus } = $props();
 

@@ -26,7 +26,7 @@
 						pending: list.filter((r) => r.status === 'pending').length,
 						approved: list.filter((r) => r.status === 'approved').length,
 						rejected: list.filter((r) => r.status === 'rejected').length,
-						people: list.filter((r) => r.status !== 'rejected').reduce((n, r) => n + 1 + r.team.members.length, 0)
+						people: list.filter((r) => r.status !== 'rejected').reduce((n, r) => n + r.teamSize, 0)
 					}
 				];
 			})
@@ -75,11 +75,11 @@
 				<StateMessage icon={Inbox} title="No registrations yet" description="Share the registration page — new entries appear here instantly." />
 			{:else}
 				<ul class="divide-y divide-border">
-					{#each recent as r (r.registrationId)}
+					{#each recent as r (r.id)}
 						<li class="grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-0.5 px-4 py-3 text-sm sm:grid-cols-[1fr_8rem_6rem_auto]">
 							<span class="min-w-0">
-								<span class="block truncate font-medium">{r.personal.name}</span>
-								<span class="block truncate text-xs text-muted-foreground">{r.academic.college}</span>
+								<span class="block truncate font-medium">{r.teamLeader.name || '—'}</span>
+								<span class="block truncate text-xs text-muted-foreground">{r.teamLeader.classSection} · {r.teamSize} members</span>
 							</span>
 							<span class="hidden text-muted-foreground sm:block">{EVENT_LABELS[r.event]}</span>
 							<span class="hidden text-xs text-muted-foreground tabular sm:block">{formatTimestamp(r.createdAt)}</span>
@@ -99,7 +99,6 @@
 				{#each EVENT_IDS as id (id)}
 					{@const s = byEvent[id]}
 					{@const cfg = siteConfig.value.events[id]}
-					{@const active = s.pending + s.approved}
 					<li class="p-4">
 						<div class="flex items-center justify-between gap-3">
 							<a href="/admin/{id}" class="font-medium hover:underline">{EVENT_LABELS[id]}</a>
@@ -116,17 +115,6 @@
 								</div>
 							{/each}
 						</dl>
-						{#if cfg.capacity}
-							{@const pct = Math.min(100, Math.round((active / cfg.capacity) * 100))}
-							<div class="mt-3">
-								<div class="flex justify-between text-xs text-muted-foreground">
-									<span>Capacity</span><span class="tabular">{active} / {cfg.capacity}</span>
-								</div>
-								<div class="mt-1 h-1.5 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="{EVENT_LABELS[id]} capacity used">
-									<div class="h-full rounded-full transition-[width] duration-500 {pct >= 90 ? 'bg-attention' : 'bg-brand'}" style:width="{pct}%"></div>
-								</div>
-							</div>
-						{/if}
 					</li>
 				{/each}
 			</ul>

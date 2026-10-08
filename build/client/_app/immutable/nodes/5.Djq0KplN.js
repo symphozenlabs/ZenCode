@@ -1,1 +1,0 @@
-import"../chunks/Cp_YvU0p.js";import{p as a,a as e}from"../chunks/Cb3aJbPW.js";import{E as n}from"../chunks/cc5iaeY4.js";function m(o,t){a(t,!0),n(o,{get config(){return t.data.config},eventId:"hackathon"}),e()}export{m as component};

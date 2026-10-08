@@ -85,7 +85,7 @@ export const DEFAULT_SITE_CONFIG: SiteConfig = {
 			registrationOpen: true,
 			registrationDeadline: '',
 			capacity: null,
-			teamMin: 2,
+			teamMin: 3,
 			teamMax: 4,
 			tracks: [],
 			prizes: [],
@@ -102,8 +102,8 @@ export const DEFAULT_SITE_CONFIG: SiteConfig = {
 			registrationOpen: true,
 			registrationDeadline: '',
 			capacity: null,
-			teamMin: 1,
-			teamMax: 3,
+			teamMin: 2,
+			teamMax: 2,
 			tracks: [],
 			prizes: [],
 			rules: []
@@ -127,7 +127,13 @@ export function mergeSiteConfig(stored: unknown): SiteConfig {
 	const s = stored as Partial<SiteConfig>;
 	const events = { ...base.events };
 	for (const id of EVENT_IDS) {
-		events[id] = { ...base.events[id], ...(s.events?.[id] ?? {}) };
+		events[id] = {
+			...base.events[id],
+			...(s.events?.[id] ?? {}),
+			// Team sizes are fixed by the registration forms, not configurable.
+			teamMin: base.events[id].teamMin,
+			teamMax: base.events[id].teamMax
+		};
 	}
 	return { ...base, ...s, events };
 }

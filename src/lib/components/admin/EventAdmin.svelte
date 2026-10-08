@@ -5,6 +5,7 @@
 	import { ExternalLink, Plus, Trash2, CloudOff, RotateCcw } from '@lucide/svelte';
 	import { EVENT_LABELS, type EventConfig, type EventId } from '$lib/config/site';
 	import { registrations } from '$lib/stores/registrations.svelte';
+	import { TEAM_SIZES } from '$lib/registrations/model';
 	import { siteConfig } from '$lib/stores/site-config.svelte';
 	import PageHeader from './PageHeader.svelte';
 	import StatCard from './StatCard.svelte';
@@ -28,13 +29,12 @@
 		total: list.length,
 		pending: list.filter((r) => r.status === 'pending').length,
 		approved: list.filter((r) => r.status === 'approved').length,
-		people: list.filter((r) => r.status === 'approved').reduce((n, r) => n + 1 + r.team.members.length, 0)
+		people: list.filter((r) => r.status === 'approved').reduce((n, r) => n + r.teamSize, 0)
 	});
 	const loading = $derived(registrations.status !== 'ready');
 
 	// ---- Settings form -------------------------------------------------
 	let draft = $state<EventConfig | null>(null);
-	let capacityText = $state('');
 	let saving = $state(false);
 	let message = $state<{ text: string; tone: 'ok' | 'error' } | null>(null);
 	let errors = $state<Record<string, string>>({});
@@ -43,7 +43,6 @@
 
 	function resetDraft() {
 		draft = structuredClone($state.snapshot(stored));
-		capacityText = stored.capacity == null ? '' : String(stored.capacity);
 		errors = {};
 	}
 
@@ -57,10 +56,8 @@
 	});
 
 	function normalized(d: EventConfig): EventConfig {
-		const cap = capacityText.trim();
 		return {
 			...d,
-			capacity: cap === '' ? null : Number(cap),
 			tracks: d.tracks.map((t) => t.trim()).filter(Boolean),
 			rules: d.rules.map((t) => t.trim()).filter(Boolean),
 			prizes: d.prizes.map((p) => ({ place: p.place.trim(), reward: p.reward.trim() })).filter((p) => p.place || p.reward)
@@ -76,10 +73,6 @@
 		const e: Record<string, string> = {};
 		if (!d.title.trim()) e.title = 'Enter a title.';
 		if (d.startDate && d.endDate && d.endDate < d.startDate) e.endDate = 'End date must be after the start date.';
-		if (!Number.isInteger(d.teamMin) || d.teamMin < 1) e.teamMin = 'At least 1.';
-		if (!Number.isInteger(d.teamMax) || d.teamMax < d.teamMin) e.teamMax = 'Must be ≥ minimum.';
-		if (d.teamMax > 10) e.teamMax = 'Maximum is 10.';
-		if (d.capacity != null && (!Number.isInteger(d.capacity) || d.capacity < 1)) e.capacity = 'Enter a whole number, or leave empty for unlimited.';
 		return e;
 	}
 
@@ -113,6 +106,7 @@
 	}
 
 	const label = $derived(EVENT_LABELS[eventId]);
+	const teamSizeLabel = $derived(TEAM_SIZES[eventId].join(' or ') + ' members');
 	const publicHref = $derived(eventId === 'hackathon' ? '/hackathon' : '/pitch-fest');
 </script>
 
@@ -128,7 +122,7 @@
 	<StatCard label="Registrations" value={stats.total} {loading} />
 	<StatCard label="Pending" value={stats.pending} {loading} />
 	<StatCard label="Approved entries" value={stats.approved} {loading} />
-	<StatCard label="Approved people" value={stats.people} helper="Leads + team members" {loading} />
+	<StatCard label="Approved people" value={stats.people} helper="All members of approved teams" {loading} />
 </div>
 
 <div class="mb-4 flex gap-1 border-b border-border" role="tablist">
@@ -160,16 +154,9 @@
 			<Toggle bind:checked={draft.registrationOpen} label="Accept registrations" description="When off, the public form shows this event as closed." />
 			<div class="grid gap-4 sm:grid-cols-2">
 				<Field label="Registration deadline" type="date" bind:value={draft.registrationDeadline} hint="Optional. Closes at 23:59 on this day." />
-				<Field label="Capacity" type="number" min="1" bind:value={capacityText} error={errors.capacity} hint="Pending + approved entries. Empty = unlimited." />
 				<div class="flex flex-col gap-1.5">
-					<label for="team-min" class="text-[13px] font-medium">Min team size</label>
-					<input id="team-min" type="number" min="1" max="10" bind:value={draft.teamMin} class="h-9 rounded-md border border-input bg-card px-3 text-sm outline-none focus:border-ring focus:ring-3 focus:ring-ring/20" />
-					{#if errors.teamMin}<p class="text-[13px] text-destructive">{errors.teamMin}</p>{/if}
-				</div>
-				<div class="flex flex-col gap-1.5">
-					<label for="team-max" class="text-[13px] font-medium">Max team size</label>
-					<input id="team-max" type="number" min="1" max="10" bind:value={draft.teamMax} class="h-9 rounded-md border border-input bg-card px-3 text-sm outline-none focus:border-ring focus:ring-3 focus:ring-ring/20" />
-					{#if errors.teamMax}<p class="text-[13px] text-destructive">{errors.teamMax}</p>{:else}<p class="text-[13px] text-muted-foreground">Including the lead. 1 = solo.</p>{/if}
+					<p class="text-[13px] font-medium">Team size</p>
+					<p class="flex h-9 items-center text-sm text-muted-foreground">{teamSizeLabel} — fixed by the registration form</p>
 				</div>
 			</div>
 		</section>

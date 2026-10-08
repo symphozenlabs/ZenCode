@@ -1,26 +1,77 @@
-import { collection, doc, onSnapshot, orderBy, query, updateDoc, writeBatch, type Unsubscribe } from 'firebase/firestore';
+import { collection, deleteDoc, doc, onSnapshot, updateDoc, type DocumentData, type Unsubscribe } from 'firebase/firestore';
 import { db } from '$lib/firebase/client';
 import { adminAuth } from './admin-auth.svelte';
-import { registrationKeyId, type Registration, type RegistrationStatus } from '$lib/validation/registration';
+import { EVENT_IDS, type EventId } from '$lib/config/site';
+import {
+	COLLECTION_BY_EVENT,
+	REGISTRATION_STATUSES,
+	searchFields,
+	type Registration,
+	type RegistrationStatus,
+	type TeamLeader,
+	type TeamMember
+} from '$lib/registrations/model';
+
+function toMillis(v: unknown): number {
+	if (typeof v === 'number') return v;
+	if (v && typeof v === 'object' && 'toMillis' in v && typeof v.toMillis === 'function') return v.toMillis();
+	return 0;
+}
+
+const str = (v: unknown) => (typeof v === 'string' ? v : '');
+
+/** Normalise a stored document (tolerates older/partial docs). */
+function fromDoc(id: string, event: EventId, d: DocumentData): Registration {
+	const members: TeamMember[] = Array.isArray(d.members)
+		? d.members.map((m: DocumentData, i: number) => ({
+				memberNumber: typeof m?.memberNumber === 'number' ? m.memberNumber : i + 1,
+				name: str(m?.name),
+				admissionNumber: str(m?.admissionNumber),
+				email: str(m?.email)
+			}))
+		: [];
+	const status = (REGISTRATION_STATUSES as readonly string[]).includes(d.status) ? (d.status as RegistrationStatus) : 'pending';
+	return {
+		id,
+		event,
+		teamSize: typeof d.teamSize === 'number' ? d.teamSize : members.length,
+		teamLeader: {
+			name: str(d.teamLeader?.name),
+			admissionNumber: str(d.teamLeader?.admissionNumber),
+			classSection: str(d.teamLeader?.classSection),
+			email: str(d.teamLeader?.email)
+		},
+		members,
+		status,
+		createdAt: toMillis(d.registeredAt),
+		reviewedBy: typeof d.reviewedBy === 'string' ? d.reviewedBy : null
+	};
+}
 
 /**
- * One live Firestore subscription to `registrations`, shared by every admin
- * page and reference-counted so it closes when no page needs it.
+ * Live view of both registration collections, shared by every admin page
+ * and reference-counted so the listeners close when no page needs them.
  */
 class RegistrationsStore {
-	items = $state<Registration[]>([]);
-	status = $state<'idle' | 'loading' | 'ready' | 'error'>('idle');
-	#unsub: Unsubscribe | null = null;
+	#byEvent = $state<Record<EventId, Registration[]>>({ hackathon: [], 'pitch-fest': [] });
+	#ready = $state<Record<EventId, boolean>>({ hackathon: false, 'pitch-fest': false });
+	#error = $state(false);
+	#unsubs: Unsubscribe[] = [];
 	#refs = 0;
 
+	items = $derived(
+		[...this.#byEvent.hackathon, ...this.#byEvent['pitch-fest']].sort((a, b) => b.createdAt - a.createdAt)
+	);
+	status = $derived<'loading' | 'ready' | 'error'>(
+		this.#error ? 'error' : EVENT_IDS.every((id) => this.#ready[id]) ? 'ready' : 'loading'
+	);
 	pending = $derived(this.items.filter((r) => r.status === 'pending').length);
 
 	subscribe() {
 		this.#refs++;
-		if (!this.#unsub) this.#listen();
+		if (!this.#unsubs.length) this.#listen();
 		return () => {
-			this.#refs--;
-			if (this.#refs <= 0) this.#stop();
+			if (--this.#refs <= 0) this.#stop();
 		};
 	}
 
@@ -30,51 +81,55 @@ class RegistrationsStore {
 	}
 
 	#listen() {
-		this.status = 'loading';
-		this.#unsub = onSnapshot(
-			query(collection(db(), 'registrations'), orderBy('createdAt', 'desc')),
-			(snap) => {
-				this.items = snap.docs.map((d) => ({ ...(d.data() as Registration), registrationId: d.id }));
-				this.status = 'ready';
-			},
-			(err) => {
-				console.error('[registrations]', err);
-				this.status = 'error';
-				this.#unsub = null;
-			}
-		);
+		this.#error = false;
+		for (const id of EVENT_IDS) {
+			this.#ready[id] = false;
+			this.#unsubs.push(
+				onSnapshot(
+					collection(db(), COLLECTION_BY_EVENT[id]),
+					(snap) => {
+						this.#byEvent[id] = snap.docs.map((d) => fromDoc(d.id, id, d.data()));
+						this.#ready[id] = true;
+					},
+					(err) => {
+						console.error(`[registrations:${id}]`, err);
+						this.#error = true;
+					}
+				)
+			);
+		}
 	}
 
 	#stop() {
-		this.#unsub?.();
-		this.#unsub = null;
+		this.#unsubs.forEach((u) => u());
+		this.#unsubs = [];
 		this.#refs = Math.max(0, this.#refs);
 	}
 
-	setStatus(id: string, status: RegistrationStatus) {
-		return updateDoc(doc(db(), 'registrations', id), {
+	#ref(r: Pick<Registration, 'id' | 'event'>) {
+		return doc(db(), COLLECTION_BY_EVENT[r.event], r.id);
+	}
+
+	setStatus(r: Registration, status: RegistrationStatus) {
+		return updateDoc(this.#ref(r), {
 			status,
-			updatedAt: Date.now(),
-			reviewedBy: adminAuth.user?.email ?? null
+			reviewedBy: adminAuth.user?.email ?? null,
+			reviewedAt: Date.now()
 		});
 	}
 
-	update(id: string, data: Pick<Registration, 'personal' | 'academic' | 'team'>) {
-		return updateDoc(doc(db(), 'registrations', id), {
-			personal: data.personal,
-			academic: data.academic,
-			team: data.team,
-			emailLower: data.personal.email.trim().toLowerCase(),
-			updatedAt: Date.now()
+	update(r: Registration, data: { teamLeader: TeamLeader; members: TeamMember[] }) {
+		const members = data.members.map((m, i) => ({ ...m, memberNumber: i + 1 }));
+		return updateDoc(this.#ref(r), {
+			teamLeader: data.teamLeader,
+			members,
+			teamSize: members.length,
+			...searchFields(members)
 		});
 	}
 
-	/** Delete the registration and its uniqueness key so the email can register again. */
 	remove(r: Registration) {
-		const batch = writeBatch(db());
-		batch.delete(doc(db(), 'registrations', r.registrationId));
-		batch.delete(doc(db(), 'registrationKeys', registrationKeyId(r.event, r.emailLower)));
-		return batch.commit();
+		return deleteDoc(this.#ref(r));
 	}
 }
 

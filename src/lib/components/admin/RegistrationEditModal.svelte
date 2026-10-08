@@ -1,63 +1,82 @@
 <script lang="ts">
 	import { Plus, Trash2 } from '@lucide/svelte';
-	import type { EventConfig } from '$lib/config/site';
-	import {
-		ACADEMIC_YEARS,
-		validateAcademic,
-		validatePersonal,
-		validateTeam,
-		type Errors,
-		type Registration
-	} from '$lib/validation/registration';
+	import { TEAM_SIZES, type Registration, type TeamLeader, type TeamMember } from '$lib/registrations/model';
 	import { registrations } from '$lib/stores/registrations.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Field from '$lib/components/ui/Field.svelte';
-	import SelectField from '$lib/components/ui/SelectField.svelte';
 
 	interface Props {
 		registration: Registration | null;
-		eventConfig: EventConfig | null;
 		onclose: () => void;
 		onsaved: (message: string) => void;
 	}
-	let { registration, eventConfig, onclose, onsaved }: Props = $props();
+	let { registration, onclose, onsaved }: Props = $props();
 
-	let draft = $state<Pick<Registration, 'personal' | 'academic' | 'team'> | null>(null);
-	let errors = $state<Errors>({});
+	type MemberDraft = Omit<TeamMember, 'memberNumber'>;
+	let leader = $state<TeamLeader>({ name: '', admissionNumber: '', classSection: '', email: '' });
+	/** Members 2..n (member 1 is always the leader) */
+	let others = $state<MemberDraft[]>([]);
+	let errors = $state<Record<string, string>>({});
 	let saving = $state(false);
 	let saveError = $state('');
 
 	$effect(() => {
-		if (registration) {
-			draft = structuredClone({
-				personal: { ...registration.personal },
-				academic: { ...registration.academic },
-				team: { ...registration.team, members: registration.team.members.map((m) => ({ ...m })) }
-			});
-			errors = {};
-			saveError = '';
-		}
+		if (!registration) return;
+		leader = { ...registration.teamLeader };
+		others = registration.members.slice(1).map(({ name, admissionNumber, email }) => ({ name, admissionNumber, email }));
+		errors = {};
+		saveError = '';
 	});
 
-	const trackOptions = $derived.by(() => {
-		const tracks = eventConfig?.tracks ?? [];
-		const current = draft?.team.track;
-		return current && !tracks.includes(current) ? [current, ...tracks] : tracks;
-	});
+	const sizes = $derived(registration ? TEAM_SIZES[registration.event] : [2]);
+	const maxOthers = $derived(Math.max(...sizes) - 1);
+	const minOthers = $derived(Math.min(...sizes) - 1);
+
+	const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+	function validate() {
+		const e: Record<string, string> = {};
+		if (!leader.name.trim()) e['leader.name'] = 'Required.';
+		if (!leader.admissionNumber.trim()) e['leader.admissionNumber'] = 'Required.';
+		if (!leader.classSection.trim()) e['leader.classSection'] = 'Required.';
+		if (!EMAIL.test(leader.email.trim())) e['leader.email'] = 'Enter a valid email.';
+		const adm = new Set([leader.admissionNumber.trim().toUpperCase()]);
+		const mail = new Set([leader.email.trim().toLowerCase()]);
+		others.forEach((m, i) => {
+			if (!m.name.trim()) e[`m.${i}.name`] = 'Required.';
+			const a = m.admissionNumber.trim().toUpperCase();
+			if (!a) e[`m.${i}.admissionNumber`] = 'Required.';
+			else if (adm.has(a)) e[`m.${i}.admissionNumber`] = 'Duplicate in team.';
+			adm.add(a);
+			const em = m.email.trim().toLowerCase();
+			if (!EMAIL.test(em)) e[`m.${i}.email`] = 'Enter a valid email.';
+			else if (mail.has(em)) e[`m.${i}.email`] = 'Duplicate in team.';
+			mail.add(em);
+		});
+		return e;
+	}
 
 	async function save() {
-		if (!registration || !draft) return;
-		const input = { event: registration.event, ...draft };
-		// Admins may adjust team size beyond the public limits; field formats still apply.
-		const relaxed = eventConfig ? { ...eventConfig, teamMin: 1, teamMax: Math.max(eventConfig.teamMax, 1 + draft.team.members.length) } : null;
-		errors = { ...validatePersonal(input), ...validateAcademic(input), ...validateTeam(input, relaxed) };
+		if (!registration) return;
+		errors = validate();
 		if (Object.keys(errors).length) return;
 		saving = true;
 		saveError = '';
+		const l = { ...$state.snapshot(leader) };
+		for (const k of Object.keys(l) as (keyof TeamLeader)[]) l[k] = l[k].trim();
+		const members: TeamMember[] = [
+			{ memberNumber: 1, name: l.name, admissionNumber: l.admissionNumber, email: l.email },
+			...$state.snapshot(others).map((m, i) => ({
+				memberNumber: i + 2,
+				name: m.name.trim(),
+				admissionNumber: m.admissionNumber.trim(),
+				email: m.email.trim()
+			}))
+		];
 		try {
-			await registrations.update(registration.registrationId, $state.snapshot(draft));
-			onsaved(`Saved changes to ${registration.registrationId}`);
+			await registrations.update(registration, { teamLeader: l, members });
+			onsaved(`Saved changes to ${l.name}'s team`);
 			onclose();
 		} catch {
 			saveError = 'Unable to save changes. Check your connection and try again.';
@@ -67,54 +86,39 @@
 	}
 </script>
 
-<Modal
-	open={!!registration && !!draft}
-	title="Edit registration"
-	description={registration?.registrationId}
-	size="lg"
-	{onclose}
->
-	{#if draft}
-		<form id="edit-registration" class="space-y-8" onsubmit={(e) => { e.preventDefault(); save(); }} novalidate>
-			<fieldset class="grid gap-4 sm:grid-cols-2">
-				<legend class="mb-3 text-xs font-semibold tracking-[0.08em] text-muted-foreground uppercase">Personal</legend>
-				<Field class="sm:col-span-2" label="Name" bind:value={draft.personal.name} error={errors['personal.name']} />
-				<Field label="Email" type="email" bind:value={draft.personal.email} error={errors['personal.email']} />
-				<Field label="Phone" type="tel" bind:value={draft.personal.phone} error={errors['personal.phone']} />
-			</fieldset>
-			<fieldset class="grid gap-4 sm:grid-cols-3">
-				<legend class="mb-3 text-xs font-semibold tracking-[0.08em] text-muted-foreground uppercase">Academic</legend>
-				<Field label="College" bind:value={draft.academic.college} error={errors['academic.college']} />
-				<Field label="Department" bind:value={draft.academic.department} error={errors['academic.department']} />
-				<SelectField label="Year" bind:value={draft.academic.year} options={ACADEMIC_YEARS} error={errors['academic.year']} />
-			</fieldset>
-			<fieldset class="grid gap-4 sm:grid-cols-2">
-				<legend class="mb-3 text-xs font-semibold tracking-[0.08em] text-muted-foreground uppercase">Team</legend>
-				<Field label="Team name" bind:value={draft.team.name} error={errors['team.name']} />
-				{#if trackOptions.length}
-					<SelectField label="Track" bind:value={draft.team.track} options={trackOptions} placeholder="No track" />
-				{:else}
-					<Field label="Track" bind:value={draft.team.track} />
-				{/if}
-				<div class="sm:col-span-2">
-					<p class="text-[13px] font-medium">Members <span class="font-normal text-muted-foreground">(excluding lead)</span></p>
-					<ul class="mt-2 space-y-2">
-						{#each draft.team.members as m, i (i)}
-							<li class="grid grid-cols-[1fr_1fr_auto] items-start gap-2">
-								<Field label="Name" bind:value={m.name} error={errors[`team.members.${i}.name`]} class="[&_label]:sr-only" placeholder="Name" />
-								<Field label="Email" type="email" bind:value={m.email} error={errors[`team.members.${i}.email`]} class="[&_label]:sr-only" placeholder="Email" />
-								<Button variant="ghost" size="icon" aria-label="Remove member" onclick={() => draft?.team.members.splice(i, 1)}><Trash2 class="size-4" /></Button>
-							</li>
-						{/each}
-					</ul>
-					<Button variant="outline" size="sm" class="mt-2" onclick={() => draft?.team.members.push({ name: '', email: '' })}>
-						<Plus class="size-3.5" /> Add member
-					</Button>
-				</div>
-			</fieldset>
-			{#if saveError}<p class="text-sm text-destructive" role="alert">{saveError}</p>{/if}
-		</form>
-	{/if}
+<Modal open={!!registration} title="Edit registration" description={registration ? `Team of ${registration.teamLeader.name}` : ''} size="lg" {onclose}>
+	<form id="edit-registration" class="space-y-8" onsubmit={(e) => { e.preventDefault(); save(); }} novalidate>
+		<fieldset class="grid gap-4 sm:grid-cols-2">
+			<legend class="mb-3 text-xs font-semibold tracking-[0.08em] text-muted-foreground uppercase">Team leader</legend>
+			<Field label="Name" bind:value={leader.name} error={errors['leader.name']} />
+			<Field label="Admission number" bind:value={leader.admissionNumber} error={errors['leader.admissionNumber']} />
+			<Field label="Class & section" bind:value={leader.classSection} error={errors['leader.classSection']} />
+			<Field label="Email" type="email" bind:value={leader.email} error={errors['leader.email']} />
+		</fieldset>
+
+		<fieldset>
+			<legend class="mb-3 text-xs font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+				Members · {1 + others.length} total
+			</legend>
+			<ul class="space-y-3">
+				{#each others as m, i (i)}
+					<li class="grid items-start gap-2 sm:grid-cols-[2rem_1fr_1fr_1fr_auto]">
+						<span class="pt-2 font-mono text-xs text-muted-foreground">0{i + 2}</span>
+						<Field label="Name" bind:value={m.name} error={errors[`m.${i}.name`]} placeholder="Name" class="[&_label]:sr-only" />
+						<Field label="Admission number" bind:value={m.admissionNumber} error={errors[`m.${i}.admissionNumber`]} placeholder="Admission no." class="[&_label]:sr-only" />
+						<Field label="Email" type="email" bind:value={m.email} error={errors[`m.${i}.email`]} placeholder="Email" class="[&_label]:sr-only" />
+						<Button variant="ghost" size="icon" aria-label="Remove member {i + 2}" disabled={others.length <= minOthers} onclick={() => others.splice(i, 1)}><Trash2 class="size-4" /></Button>
+					</li>
+				{/each}
+			</ul>
+			{#if others.length < maxOthers}
+				<Button variant="outline" size="sm" class="mt-3" onclick={() => others.push({ name: '', admissionNumber: '', email: '' })}>
+					<Plus class="size-3.5" /> Add member
+				</Button>
+			{/if}
+		</fieldset>
+		{#if saveError}<p class="text-sm text-destructive" role="alert">{saveError}</p>{/if}
+	</form>
 	{#snippet footer()}
 		<Button variant="outline" onclick={onclose}>Cancel</Button>
 		<Button type="submit" form="edit-registration" loading={saving}>{saving ? 'Saving…' : 'Save changes'}</Button>

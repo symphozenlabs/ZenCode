@@ -19,9 +19,8 @@
 		SearchX
 	} from '@lucide/svelte';
 	import { EVENT_LABELS, type EventId } from '$lib/config/site';
-	import type { Registration, RegistrationStatus } from '$lib/validation/registration';
+	import { referenceId, type Registration, type RegistrationStatus } from '$lib/registrations/model';
 	import { registrations } from '$lib/stores/registrations.svelte';
-	import { siteConfig } from '$lib/stores/site-config.svelte';
 	import { formatTimestamp } from '$lib/utils/format';
 	import { downloadCsv, toCsv } from '$lib/utils/csv';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -33,7 +32,7 @@
 
 	type StatusFilter = RegistrationStatus | 'all';
 	type EventFilter = EventId | 'all';
-	type SortKey = 'name' | 'event' | 'status' | 'createdAt' | 'team';
+	type SortKey = 'name' | 'event' | 'status' | 'createdAt' | 'class';
 
 	interface Props {
 		/** Lock the table to one event (event admin pages) */
@@ -56,8 +55,6 @@
 	let deleting = $state<Registration | null>(null);
 	let deleteBusy = $state(false);
 
-	$effect(() => siteConfig.subscribe());
-
 	const scoped = $derived(
 		registrations.items.filter((r) => (event ? r.event === event : eventFilter === 'all' || r.event === eventFilter))
 	);
@@ -75,14 +72,13 @@
 			if (statusFilter !== 'all' && r.status !== statusFilter) return false;
 			if (!q) return true;
 			return [
-				r.registrationId,
-				r.personal.name,
-				r.personal.email,
-				r.personal.phone,
-				r.academic.college,
-				r.team.name,
-				r.team.track,
-				...r.team.members.map((m) => `${m.name} ${m.email}`)
+				r.id,
+				referenceId(r.id),
+				r.teamLeader.name,
+				r.teamLeader.email,
+				r.teamLeader.admissionNumber,
+				r.teamLeader.classSection,
+				...r.members.map((m) => `${m.name} ${m.email} ${m.admissionNumber}`)
 			]
 				.join(' ')
 				.toLowerCase()
@@ -91,13 +87,13 @@
 		const dir = sortDir === 'asc' ? 1 : -1;
 		const val = (r: Registration): string | number =>
 			sortKey === 'name'
-				? r.personal.name.toLowerCase()
+				? r.teamLeader.name.toLowerCase()
 				: sortKey === 'event'
 					? r.event
 					: sortKey === 'status'
 						? r.status
-						: sortKey === 'team'
-							? (r.team.name || '').toLowerCase()
+						: sortKey === 'class'
+							? r.teamLeader.classSection.toLowerCase()
 							: r.createdAt;
 		return [...rows].sort((a, b) => (val(a) > val(b) ? dir : val(a) < val(b) ? -dir : 0));
 	});
@@ -135,14 +131,14 @@
 	}
 
 	async function setStatus(r: Registration, status: RegistrationStatus) {
-		busy = { ...busy, [r.registrationId]: status };
+		busy = { ...busy, [r.id]: status };
 		try {
-			await registrations.setStatus(r.registrationId, status);
-			notify(`${r.registrationId} marked ${status}`);
+			await registrations.setStatus(r, status);
+			notify(`${r.teamLeader.name}'s team marked ${status}`);
 		} catch {
 			notify('Unable to update status. Try again.', 'error');
 		} finally {
-			const { [r.registrationId]: _, ...rest } = busy;
+			const { [r.id]: _, ...rest } = busy;
 			busy = rest;
 		}
 	}
@@ -152,8 +148,8 @@
 		deleteBusy = true;
 		try {
 			await registrations.remove(deleting);
-			notify(`Deleted ${deleting.registrationId}`);
-			if (expanded === deleting.registrationId) expanded = null;
+			notify(`Deleted ${deleting.teamLeader.name}'s team`);
+			if (expanded === deleting.id) expanded = null;
 			deleting = null;
 		} catch {
 			notify('Unable to delete this registration.', 'error');
@@ -164,14 +160,14 @@
 
 	function exportCsv() {
 		const headers = [
-			'Registration ID', 'Status', 'Event', 'Name', 'Email', 'Phone', 'College', 'Department', 'Year',
-			'Team', 'Track', 'Team size', 'Members', 'Registered at'
+			'Reference', 'Document ID', 'Status', 'Event', 'Leader name', 'Leader admission no.', 'Class & section',
+			'Leader email', 'Team size', 'Members', 'Registered at'
 		];
 		const data = filtered.map((r) => [
-			r.registrationId, r.status, EVENT_LABELS[r.event], r.personal.name, r.personal.email, r.personal.phone,
-			r.academic.college, r.academic.department, r.academic.year, r.team.name, r.team.track,
-			1 + r.team.members.length, r.team.members.map((m) => `${m.name} <${m.email}>`).join('; '),
-			new Date(r.createdAt).toISOString()
+			referenceId(r.id), r.id, r.status, EVENT_LABELS[r.event], r.teamLeader.name, r.teamLeader.admissionNumber,
+			r.teamLeader.classSection, r.teamLeader.email, r.teamSize,
+			r.members.map((m) => `${m.name} (${m.admissionNumber}) <${m.email}>`).join('; '),
+			r.createdAt ? new Date(r.createdAt).toISOString() : ''
 		]);
 		const stamp = new Date().toISOString().slice(0, 10);
 		downloadCsv(`zencode-${event ?? 'registrations'}-${statusFilter}-${stamp}.csv`, toCsv(headers, data));
@@ -205,7 +201,7 @@
 		<p class="text-[11px] font-semibold tracking-[0.1em] text-muted-foreground uppercase">{title}</p>
 		<dl class="mt-2 space-y-1.5">
 			{#each items as [k, v] (k)}
-				<div class="grid grid-cols-[6.5rem_1fr] gap-2 text-[13px]">
+				<div class="grid grid-cols-[7rem_1fr] gap-2 text-[13px]">
 					<dt class="text-muted-foreground">{k}</dt>
 					<dd class="break-words text-foreground">{v || '—'}</dd>
 				</div>
@@ -224,7 +220,7 @@
 				id="reg-search"
 				type="search"
 				bind:value={search}
-				placeholder="Search name, email, ID, team…"
+				placeholder="Search name, admission no., email, class…"
 				class="h-9 w-full rounded-md border border-input bg-muted pr-3 pl-9 text-sm outline-none transition-[border-color,box-shadow] duration-150 focus:border-ring focus:bg-card focus:ring-3 focus:ring-ring/20"
 			/>
 		</div>
@@ -277,7 +273,7 @@
 			{/each}
 		</div>
 	{:else if !scoped.length}
-		<StateMessage icon={Inbox} title="No registrations yet" description="New sign-ups from the public registration form will appear here in real time." />
+		<StateMessage icon={Inbox} title="No registrations yet" description="Teams registered on the public form will appear here in real time." />
 	{:else if !filtered.length}
 		<StateMessage icon={SearchX} title="No matches" description="Nothing matches these filters.">
 			<Button variant="outline" onclick={() => { search = ''; statusFilter = 'all'; eventFilter = 'all'; }}>Clear filters</Button>
@@ -288,53 +284,50 @@
 				<thead class="bg-secondary/60 text-[12px] text-muted-foreground">
 					<tr>
 						<th scope="col" class="w-10 px-3 py-2.5"><span class="sr-only">Expand</span></th>
-						{@render sortHeader('name', 'Name')}
+						{@render sortHeader('name', 'Team leader')}
 						{#if !event}{@render sortHeader('event', 'Event', 'hidden md:table-cell')}{/if}
-						{@render sortHeader('team', 'Team', 'hidden lg:table-cell')}
+						{@render sortHeader('class', 'Class & section', 'hidden lg:table-cell')}
 						{@render sortHeader('status', 'Status')}
 						{@render sortHeader('createdAt', 'Registered', 'hidden sm:table-cell')}
 						<th scope="col" class="px-3 py-2.5 text-right font-medium"><span class="sr-only">Actions</span></th>
 					</tr>
 				</thead>
 				<tbody>
-					{#each rows as r (r.registrationId)}
-						{@const open = expanded === r.registrationId}
-						{@const rowBusy = busy[r.registrationId]}
+					{#each rows as r (r.id)}
+						{@const open = expanded === r.id}
+						{@const rowBusy = busy[r.id]}
 						<tr class="border-t border-border transition-colors duration-150 hover:bg-muted/50 {open ? 'bg-muted/40' : ''}">
 							<td class="px-3 py-2.5">
 								<button
 									type="button"
 									class="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
 									aria-expanded={open}
-									aria-controls="detail-{r.registrationId}"
-									aria-label="{open ? 'Collapse' : 'Expand'} {r.personal.name}"
-									onclick={() => (expanded = open ? null : r.registrationId)}
+									aria-controls="detail-{r.id}"
+									aria-label="{open ? 'Collapse' : 'Expand'} {r.teamLeader.name}"
+									onclick={() => (expanded = open ? null : r.id)}
 								>
 									<ChevronRight class="size-4 transition-transform duration-200 {open ? 'rotate-90' : ''}" />
 								</button>
 							</td>
 							<td class="px-3 py-2.5">
-								<button type="button" class="text-left" onclick={() => (expanded = open ? null : r.registrationId)}>
-									<span class="block font-medium text-foreground">{r.personal.name}</span>
-									<span class="block font-mono text-[11px] text-muted-foreground">{r.registrationId}</span>
+								<button type="button" class="text-left" onclick={() => (expanded = open ? null : r.id)}>
+									<span class="block font-medium text-foreground">{r.teamLeader.name || '—'}</span>
+									<span class="block font-mono text-[11px] text-muted-foreground">{referenceId(r.id)} · {r.teamSize} members</span>
 								</button>
 							</td>
 							{#if !event}<td class="hidden px-3 py-2.5 text-foreground md:table-cell">{EVENT_LABELS[r.event]}</td>{/if}
-							<td class="hidden px-3 py-2.5 lg:table-cell">
-								<span class="text-foreground">{r.team.name || 'Solo'}</span>
-								<span class="ml-1 text-xs text-muted-foreground tabular">· {1 + r.team.members.length}</span>
-							</td>
+							<td class="hidden px-3 py-2.5 text-foreground lg:table-cell">{r.teamLeader.classSection || '—'}</td>
 							<td class="px-3 py-2.5"><StatusBadge status={r.status} /></td>
 							<td class="hidden px-3 py-2.5 text-muted-foreground tabular sm:table-cell">{formatTimestamp(r.createdAt)}</td>
 							<td class="px-3 py-2.5">
 								<div class="flex justify-end gap-1">
 									{#if r.status !== 'approved'}
-										<Button size="sm" variant="ghost" class="text-emerald-700 hover:bg-emerald-50" loading={rowBusy === 'approved'} disabled={!!rowBusy} onclick={() => setStatus(r, 'approved')} aria-label="Approve {r.personal.name}">
+										<Button size="sm" variant="ghost" class="text-emerald-700 hover:bg-emerald-50" loading={rowBusy === 'approved'} disabled={!!rowBusy} onclick={() => setStatus(r, 'approved')} aria-label="Approve {r.teamLeader.name}'s team">
 											{#if rowBusy !== 'approved'}<Check class="size-4" />{/if}<span class="hidden xl:inline">Approve</span>
 										</Button>
 									{/if}
 									{#if r.status !== 'rejected'}
-										<Button size="sm" variant="ghost" class="text-destructive hover:bg-red-50" loading={rowBusy === 'rejected'} disabled={!!rowBusy} onclick={() => setStatus(r, 'rejected')} aria-label="Reject {r.personal.name}">
+										<Button size="sm" variant="ghost" class="text-destructive hover:bg-red-50" loading={rowBusy === 'rejected'} disabled={!!rowBusy} onclick={() => setStatus(r, 'rejected')} aria-label="Reject {r.teamLeader.name}'s team">
 											{#if rowBusy !== 'rejected'}<X class="size-4" />{/if}<span class="hidden xl:inline">Reject</span>
 										</Button>
 									{/if}
@@ -342,27 +335,25 @@
 							</td>
 						</tr>
 						{#if open}
-							<tr id="detail-{r.registrationId}" class="bg-muted/40">
+							<tr id="detail-{r.id}" class="bg-muted/40">
 								<td colspan="7" class="p-0">
 									<div transition:slide={{ duration: 200 }}>
 										<div class="border-t border-dashed border-border px-4 py-5 md:pl-14">
 											<p class="text-xs font-semibold tracking-[0.1em] text-foreground uppercase">Participant details</p>
-											<div class="mt-4 grid gap-6 sm:grid-cols-2 xl:grid-cols-4">
-												{@render detailGroup('Personal', [['Name', r.personal.name], ['Email', r.personal.email], ['Phone', r.personal.phone]])}
-												{@render detailGroup('Academic', [['College', r.academic.college], ['Department', r.academic.department], ['Year', r.academic.year]])}
-												{@render detailGroup('Event', [['Event', EVENT_LABELS[r.event]], ['Track', r.team.track], ['Team', r.team.name || 'Solo']])}
-												{@render detailGroup('Registration', [['ID', r.registrationId], ['Registered', formatTimestamp(r.createdAt, true)], ['Status', r.status[0].toUpperCase() + r.status.slice(1)], ['Reviewed by', r.reviewedBy ?? '']])}
+											<div class="mt-4 grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
+												{@render detailGroup('Team leader', [['Name', r.teamLeader.name], ['Admission no.', r.teamLeader.admissionNumber], ['Class & section', r.teamLeader.classSection], ['Email', r.teamLeader.email]])}
+												{@render detailGroup('Event', [['Event', EVENT_LABELS[r.event]], ['Team size', `${r.teamSize} members`]])}
+												{@render detailGroup('Registration', [['Reference', referenceId(r.id)], ['Document ID', r.id], ['Registered', formatTimestamp(r.createdAt, true)], ['Status', r.status[0].toUpperCase() + r.status.slice(1)], ['Reviewed by', r.reviewedBy ?? '']])}
 											</div>
 											<div class="mt-6">
-												<p class="text-[11px] font-semibold tracking-[0.1em] text-muted-foreground uppercase">Team members · {1 + r.team.members.length}</p>
+												<p class="text-[11px] font-semibold tracking-[0.1em] text-muted-foreground uppercase">Team members · {r.members.length}</p>
 												<ul class="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-													<li class="rounded-md border border-border bg-card px-3 py-2 text-[13px]">
-														<span class="font-medium">{r.personal.name}</span> <span class="text-[11px] text-muted-foreground uppercase">Lead</span>
-														<span class="block truncate text-muted-foreground">{r.personal.email}</span>
-													</li>
-													{#each r.team.members as m, mi (mi)}
+													{#each r.members as m, mi (mi)}
 														<li class="rounded-md border border-border bg-card px-3 py-2 text-[13px]">
-															<span class="font-medium">{m.name}</span>
+															<span class="font-mono text-[11px] text-muted-foreground">0{m.memberNumber}</span>
+															<span class="font-medium">{m.name || '—'}</span>
+															{#if m.memberNumber === 1}<span class="text-[11px] text-muted-foreground uppercase">Lead</span>{/if}
+															<span class="block truncate text-muted-foreground">{m.admissionNumber}</span>
 															<span class="block truncate text-muted-foreground">{m.email}</span>
 														</li>
 													{/each}
@@ -415,16 +406,11 @@
 	{/if}
 </div>
 
-<RegistrationEditModal
-	registration={editing}
-	eventConfig={editing ? siteConfig.value.events[editing.event] : null}
-	onclose={() => (editing = null)}
-	onsaved={(m) => notify(m)}
-/>
+<RegistrationEditModal registration={editing} onclose={() => (editing = null)} onsaved={(m) => notify(m)} />
 
-<Modal open={!!deleting} title="Delete registration?" description={deleting?.registrationId} onclose={() => (deleting = null)}>
+<Modal open={!!deleting} title="Delete registration?" description={deleting ? referenceId(deleting.id) : ''} onclose={() => (deleting = null)}>
 	<p class="text-sm text-muted-foreground">
-		This permanently removes <span class="font-medium text-foreground">{deleting?.personal.name}</span>'s registration. It can't be undone.
+		This permanently removes <span class="font-medium text-foreground">{deleting?.teamLeader.name}</span>'s team registration. It can't be undone.
 		To keep a record, reject it instead.
 	</p>
 	{#snippet footer()}

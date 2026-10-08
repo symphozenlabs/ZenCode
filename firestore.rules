@@ -1,24 +1,65 @@
 rules_version = '2';
 
 // ZenCode access boundaries.
-// - Admins are the hard-coded admin@gmail.com account, or users with a
-//   document at /admins/{uid} (created only via `npm run grant-admin`).
-// - Registrations can be created (validated below) but never read or listed
-//   by the public — only admins can see them.
+// - Admins are the hard-coded admin@gmail.com account (src/lib/config/admin.ts),
+//   or users with a document at /admins/{uid} (created via `npm run grant-admin`).
+// - Registrations live in one collection per event. The public form may only
+//   create a valid, pending registration; admins review, edit and delete them.
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() {
       return request.auth != null;
     }
 
-    // Hard-coded organiser account (see src/lib/config/admin.ts), or anyone
-    // granted via `npm run grant-admin`.
     function isAdmin() {
       return signedIn() && (
         (request.auth.token.email == 'admin@gmail.com'
           && request.auth.token.firebase.sign_in_provider == 'password')
         || exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
+    }
+
+    function isValidLeader(leader) {
+      return leader is map
+        && leader.name is string && leader.name.size() > 0
+        && leader.admissionNumber is string && leader.admissionNumber.size() > 0
+        && leader.classSection is string && leader.classSection.size() > 0
+        && leader.email is string && leader.email.size() > 0;
+    }
+
+    // New registrations always start as pending (older docs had no status).
+    function startsPending(data) {
+      return !('status' in data) || data.status == 'pending';
+    }
+
+    // Hackathon: teams of 3 or 4 (members includes the leader)
+    function isValidHackathon(data) {
+      return data.event == 'Hackathon'
+        && (data.teamSize == 3 || data.teamSize == 4)
+        && isValidLeader(data.teamLeader)
+        && data.members is list
+        && data.members.size() == data.teamSize
+        && data.registeredAt == request.time
+        && startsPending(data);
+    }
+
+    // Pitch Fest: teams of exactly 2
+    function isValidPitchFest(data) {
+      return data.event == 'Pitch Fest'
+        && data.teamSize == 2
+        && isValidLeader(data.teamLeader)
+        && data.members is list
+        && data.members.size() == 2
+        && data.registeredAt == request.time
+        && startsPending(data);
+    }
+
+    // Admin edits must keep the event and original registration time.
+    function isValidAdminUpdate() {
+      return request.resource.data.event == resource.data.event
+        && request.resource.data.registeredAt == resource.data.registeredAt
+        && (!('status' in request.resource.data)
+            || request.resource.data.status in ['pending', 'approved', 'rejected']);
     }
 
     match /admins/{uid} {
@@ -32,54 +73,21 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    function str(v, min, max) {
-      return v is string && v.size() >= min && v.size() <= max;
-    }
-
-    // Public sign-up: the server (or a browser) may only create a pending
-    // registration with exactly these fields, together with its uniqueness key.
-    function validNewRegistration(id) {
-      let d = request.resource.data;
-      let now = request.time.toMillis();
-      return id.matches('ZC-[A-Z2-9]{6}')
-        && d.keys().hasOnly(['registrationId', 'event', 'emailLower', 'status', 'createdAt',
-                             'updatedAt', 'reviewedBy', 'personal', 'academic', 'team'])
-        && d.registrationId == id
-        && d.event in ['hackathon', 'pitch-fest']
-        && d.status == 'pending'
-        && d.reviewedBy == null
-        && d.createdAt is int && d.updatedAt == d.createdAt
-        && d.createdAt > now - 300000 && d.createdAt < now + 300000
-        && d.personal.keys().hasOnly(['name', 'email', 'phone'])
-        && str(d.personal.name, 1, 80) && str(d.personal.email, 3, 120) && str(d.personal.phone, 7, 20)
-        && d.emailLower == d.personal.email.lower()
-        && d.academic.keys().hasOnly(['college', 'department', 'year'])
-        && str(d.academic.college, 1, 120) && str(d.academic.department, 1, 120) && str(d.academic.year, 1, 40)
-        && d.team.keys().hasOnly(['name', 'track', 'members'])
-        && str(d.team.name, 0, 60) && str(d.team.track, 0, 120)
-        && d.team.members is list && d.team.members.size() <= 9
-        && getAfter(/databases/$(database)/documents/registrationKeys/$(d.event + '__' + d.emailLower)).data.registrationId == id;
-    }
-
-    match /registrations/{registrationId} {
-      allow read, delete: if isAdmin();
-      allow create: if isAdmin() || validNewRegistration(registrationId);
-      allow update: if isAdmin()
-        && request.resource.data.registrationId == resource.data.registrationId
-        && request.resource.data.event == resource.data.event
-        && request.resource.data.createdAt == resource.data.createdAt
-        && request.resource.data.status in ['pending', 'approved', 'rejected'];
-    }
-
-    // One doc per (event, email). Creating over an existing key is an update,
-    // which is denied — that is what blocks duplicate registrations.
-    match /registrationKeys/{keyId} {
-      allow get: if true;
-      allow list, update: if isAdmin();
+    // NOTE: read is public because the registration form checks for duplicate
+    // admission numbers/emails in the browser. This exposes participant
+    // details to anyone; move the duplicate check server-side to lock it down.
+    match /hackathon_registered_participants/{docId} {
+      allow read: if true;
+      allow create: if isValidHackathon(request.resource.data);
+      allow update: if isAdmin() && isValidAdminUpdate();
       allow delete: if isAdmin();
-      allow create: if keyId == request.resource.data.event + '__' + request.resource.data.emailLower
-        && request.resource.data.keys().hasOnly(['registrationId', 'event', 'emailLower', 'createdAt'])
-        && existsAfter(/databases/$(database)/documents/registrations/$(request.resource.data.registrationId));
+    }
+
+    match /pitchfest_registered_participants/{docId} {
+      allow read: if true;
+      allow create: if isValidPitchFest(request.resource.data);
+      allow update: if isAdmin() && isValidAdminUpdate();
+      allow delete: if isAdmin();
     }
 
     match /{document=**} {
