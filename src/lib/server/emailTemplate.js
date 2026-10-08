@@ -33,7 +33,6 @@ export function buildRegistrationPassEmailHtml({
   const safeEvent = escapeHtml(eventLabel);
   const safeTeamName = escapeHtml(teamName || 'Registered Team');
   const safeTeamId = escapeHtml(teamId || '');
-  const safeCheckInUrl = escapeHtml(checkInUrl || '#');
   const safeQrSrc = escapeHtml(qrImageUrl || '');
 
   return `<!DOCTYPE html>
@@ -140,11 +139,9 @@ export function buildRegistrationPassEmailHtml({
                       Please present this QR code at the event check-in desk.<br>
                       The QR identifies your registered team (all members share the same team QR).
                     </p>
-                    <div style="margin-top: 14px;">
-                      <a href="${safeCheckInUrl}" style="display: inline-block; background-color: #3f7334; color: #ffffff; text-decoration: none; font-size: 13px; font-weight: 600; padding: 8px 18px; border-radius: 6px;">
-                        View Live Check-in Pass →
-                      </a>
-                    </div>
+                    <p style="margin: 10px 0 0 0; font-size: 12px; color: #647064; line-height: 1.4; max-width: 380px;">
+                      A downloadable PDF copy of this pass is attached to this email.
+                    </p>
                   </td>
                 </tr>
 
