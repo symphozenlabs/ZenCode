@@ -2,6 +2,25 @@ import { db, COLLECTIONS } from '../firebase.js';
 import { doc, getDoc } from 'firebase/firestore';
 import { sendTeamConfirmationEmails } from './email.js';
 
+const DEFAULT_PUBLIC_BASE_URL = 'https://zencode.symphozen.com';
+
+function normalizeBaseUrl(rawUrl) {
+  const trimmed = (rawUrl || '').trim();
+  if (!trimmed) return DEFAULT_PUBLIC_BASE_URL;
+
+  const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  return withProtocol.replace(/\/+$/, '');
+}
+
+function getPublicBaseUrl() {
+  return normalizeBaseUrl(
+    process.env.PUBLIC_SITE_URL ||
+    process.env.SITE_URL ||
+    process.env.VITE_PUBLIC_SITE_URL ||
+    DEFAULT_PUBLIC_BASE_URL
+  );
+}
+
 /**
  * Handles server-side API request for sending confirmation passes.
  *
@@ -67,10 +86,8 @@ export async function handleSendConfirmationApi(req, res) {
       console.log(`[REGISTRATION] Database save successful`);
       console.log(`[REGISTRATION] Generating team QR`);
 
-      // Determine base host URL for QR code
-      const host = req.headers.host || 'localhost:5173';
-      const protocol = req.headers['x-forwarded-proto'] || 'http';
-      const baseUrl = `${protocol}://${host}`;
+      // Use the canonical public URL so emailed passes never point at localhost or preview hosts.
+      const baseUrl = getPublicBaseUrl();
 
       // Dispatch team confirmation emails to each valid member
       const emailOutcome = await sendTeamConfirmationEmails({
