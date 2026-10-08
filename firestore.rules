@@ -1,0 +1,89 @@
+rules_version = '2';
+
+// ZenCode access boundaries.
+// - Admins are the hard-coded admin@gmail.com account, or users with a
+//   document at /admins/{uid} (created only via `npm run grant-admin`).
+// - Registrations can be created (validated below) but never read or listed
+//   by the public — only admins can see them.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // Hard-coded organiser account (see src/lib/config/admin.ts), or anyone
+    // granted via `npm run grant-admin`.
+    function isAdmin() {
+      return signedIn() && (
+        (request.auth.token.email == 'admin@gmail.com'
+          && request.auth.token.firebase.sign_in_provider == 'password')
+        || exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    match /admins/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
+
+    // Public event configuration (dates, venue, tracks, schedule, rules).
+    match /config/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    function str(v, min, max) {
+      return v is string && v.size() >= min && v.size() <= max;
+    }
+
+    // Public sign-up: the server (or a browser) may only create a pending
+    // registration with exactly these fields, together with its uniqueness key.
+    function validNewRegistration(id) {
+      let d = request.resource.data;
+      let now = request.time.toMillis();
+      return id.matches('ZC-[A-Z2-9]{6}')
+        && d.keys().hasOnly(['registrationId', 'event', 'emailLower', 'status', 'createdAt',
+                             'updatedAt', 'reviewedBy', 'personal', 'academic', 'team'])
+        && d.registrationId == id
+        && d.event in ['hackathon', 'pitch-fest']
+        && d.status == 'pending'
+        && d.reviewedBy == null
+        && d.createdAt is int && d.updatedAt == d.createdAt
+        && d.createdAt > now - 300000 && d.createdAt < now + 300000
+        && d.personal.keys().hasOnly(['name', 'email', 'phone'])
+        && str(d.personal.name, 1, 80) && str(d.personal.email, 3, 120) && str(d.personal.phone, 7, 20)
+        && d.emailLower == d.personal.email.lower()
+        && d.academic.keys().hasOnly(['college', 'department', 'year'])
+        && str(d.academic.college, 1, 120) && str(d.academic.department, 1, 120) && str(d.academic.year, 1, 40)
+        && d.team.keys().hasOnly(['name', 'track', 'members'])
+        && str(d.team.name, 0, 60) && str(d.team.track, 0, 120)
+        && d.team.members is list && d.team.members.size() <= 9
+        && getAfter(/databases/$(database)/documents/registrationKeys/$(d.event + '__' + d.emailLower)).data.registrationId == id;
+    }
+
+    match /registrations/{registrationId} {
+      allow read, delete: if isAdmin();
+      allow create: if isAdmin() || validNewRegistration(registrationId);
+      allow update: if isAdmin()
+        && request.resource.data.registrationId == resource.data.registrationId
+        && request.resource.data.event == resource.data.event
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.status in ['pending', 'approved', 'rejected'];
+    }
+
+    // One doc per (event, email). Creating over an existing key is an update,
+    // which is denied — that is what blocks duplicate registrations.
+    match /registrationKeys/{keyId} {
+      allow get: if true;
+      allow list, update: if isAdmin();
+      allow delete: if isAdmin();
+      allow create: if keyId == request.resource.data.event + '__' + request.resource.data.emailLower
+        && request.resource.data.keys().hasOnly(['registrationId', 'event', 'emailLower', 'createdAt'])
+        && existsAfter(/databases/$(database)/documents/registrations/$(request.resource.data.registrationId));
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

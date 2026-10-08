@@ -1,0 +1,189 @@
+@import 'tailwindcss';
+
+/*
+ * ZenCode design tokens.
+ * Palette, density, radius and motion follow styleguide.md (forest green
+ * foundation, cream neutrals, sun accent, orange reserved for attention).
+ * Every color in the app comes from these tokens — no raw hex in components.
+ */
+@theme {
+	/* Brand — forest scale */
+	--color-forest-950: #0d2d20;
+	--color-forest-900: #133a29;
+	--color-forest-800: #17462e;
+	--color-forest-700: #28613f;
+	--color-brand: #588c45;
+	--color-green-500: #629b4d;
+	--color-green-300: #8dbd77;
+	--color-green-100: #e9f2e3;
+
+	/* Stage — dark surfaces for the public hero and immersive bands */
+	--color-stage: #07130d;
+	--color-stage-raised: #0c1d15;
+	--color-stage-line: #1e3a2b;
+
+	/* Neutrals */
+	--color-cream: #f8f7f2;
+	--color-cream-dark: #eeece3;
+	--color-ink: #1c2921;
+	--color-line: #dfe4dd;
+
+	/* Accents */
+	--color-sun: #f0c45c;
+	--color-sun-light: #f9e5a9;
+	--color-attention: #f97316;
+
+	/* Product (admin) semantic tokens */
+	--color-background: #f6f8f4;
+	--color-foreground: #18231a;
+	--color-card: #ffffff;
+	--color-primary: #3f7334;
+	--color-primary-hover: #356229;
+	--color-primary-foreground: #ffffff;
+	--color-secondary: #eef4ea;
+	--color-secondary-foreground: #2f5a29;
+	--color-muted: #f0f3ee;
+	--color-muted-foreground: #647064;
+	--color-accent: #e5f0df;
+	--color-accent-foreground: #2f5f29;
+	--color-destructive: #b42318;
+	--color-border: #dce5d9;
+	--color-input: #cedacb;
+	--color-ring: #588c45;
+	--color-sidebar: #17462e;
+	--color-sidebar-accent: #23613f;
+	--color-sidebar-primary: #8dbd77;
+
+	/* Typography */
+	--font-sans: 'Inter', 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+	--font-display: 'Space Grotesk', 'Inter', ui-sans-serif, system-ui, sans-serif;
+	--font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+	/* Shape */
+	--radius-sm: 0.25rem;
+	--radius-md: 0.4rem;
+	--radius-lg: 0.625rem;
+
+	/* Motion */
+	--ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+	--animate-grid-drift: grid-drift 24s linear infinite;
+	--animate-float-slow: float-slow 14s ease-in-out infinite;
+	--animate-orb: orb-drift 22s ease-in-out infinite;
+	--animate-pulse-dot: pulse-dot 1.6s ease-in-out infinite;
+
+	@keyframes grid-drift {
+		from {
+			background-position: 0 0;
+		}
+		to {
+			background-position: 64px 64px;
+		}
+	}
+	@keyframes float-slow {
+		0%,
+		100% {
+			transform: translate3d(0, 0, 0) rotate(0deg);
+		}
+		50% {
+			transform: translate3d(0, -18px, 0) rotate(6deg);
+		}
+	}
+	@keyframes orb-drift {
+		0%,
+		100% {
+			transform: translate3d(0, 0, 0) scale(1);
+		}
+		50% {
+			transform: translate3d(4%, -3%, 0) scale(1.08);
+		}
+	}
+	@keyframes pulse-dot {
+		0%,
+		100% {
+			opacity: 1;
+		}
+		50% {
+			opacity: 0.35;
+		}
+	}
+}
+
+@layer base {
+	html {
+		-webkit-tap-highlight-color: transparent;
+	}
+	body {
+		@apply bg-cream font-sans text-ink antialiased;
+	}
+	:focus-visible {
+		outline: 2px solid var(--color-ring);
+		outline-offset: 2px;
+	}
+	.site :focus-visible {
+		outline-color: var(--color-sun);
+	}
+	::selection {
+		background: var(--color-sun-light);
+		color: var(--color-forest-950);
+	}
+}
+
+@layer utilities {
+	.tabular {
+		font-variant-numeric: tabular-nums;
+	}
+	.shell {
+		width: min(100% - 48px, 1180px);
+		margin-inline: auto;
+	}
+	.eyebrow {
+		@apply font-mono text-[11px] font-medium tracking-[0.22em] uppercase;
+	}
+}
+
+/* Hero entrance — CSS so it also plays on the server-rendered first paint */
+@keyframes rise {
+	from {
+		opacity: 0;
+		transform: translate3d(0, 0.35em, 0);
+		filter: blur(6px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+		filter: none;
+	}
+}
+.rise {
+	animation: rise 700ms var(--ease-out-quart) both;
+	animation-delay: var(--rise-delay, 0ms);
+}
+
+/* Scroll reveal (see $lib/actions/reveal.ts) */
+[data-reveal] {
+	opacity: 0;
+	transform: translate3d(0, 18px, 0);
+	transition:
+		opacity 520ms var(--ease-out-quart),
+		transform 520ms var(--ease-out-quart);
+	transition-delay: var(--reveal-delay, 0ms);
+}
+[data-reveal='in'] {
+	opacity: 1;
+	transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+		scroll-behavior: auto !important;
+	}
+	[data-reveal] {
+		opacity: 1;
+		transform: none;
+	}
+}

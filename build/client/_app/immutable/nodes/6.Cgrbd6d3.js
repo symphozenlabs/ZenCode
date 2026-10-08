@@ -1,0 +1,1 @@
+import"../chunks/Cp_YvU0p.js";import{p as o,a}from"../chunks/Cb3aJbPW.js";import{E as n}from"../chunks/cc5iaeY4.js";function f(e,t){o(t,!0),n(e,{get config(){return t.data.config},eventId:"pitch-fest"}),a()}export{f as component};
