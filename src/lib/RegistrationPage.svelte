@@ -1,6 +1,7 @@
 <script>
   import HackathonRegistration from './HackathonRegistration.svelte';
   import PitchFestRegistration from './PitchFestRegistration.svelte';
+  import logo from '../assets/logo.png';
 
   // Event selection state: 'hackathon' | 'pitchfest'
   let activeEvent = $state('hackathon');
@@ -32,7 +33,7 @@
   <!-- Minimal branded header -->
   <header class="header-hero">
     <div class="header-inner">
-      <img src="/logo.png" alt="ZEN CODE Logo" class="brand-logo" />
+      <img src={logo} alt="ZEN CODE Logo" class="brand-logo" />
 
       <div class="header-copy">
         <span class="eyebrow-text">ZEN CODE 2026</span>

@@ -22,6 +22,7 @@
     register={registerPitchFestTeam}
     minMembers={1}
     maxMembers={2}
+    askTeamName={false}
     idPrefix="pitch"
     submitLabel="REGISTER FOR PITCH FEST"
   />

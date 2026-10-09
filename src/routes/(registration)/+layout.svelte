@@ -6,7 +6,10 @@
 
 <!-- Same head as main's index.html -->
 <svelte:head>
-	<link rel="icon" type="image/png" href="/logo.png" />
+	<link rel="icon" href="/favicon.ico" sizes="48x48" />
+	<link rel="icon" href="/favicon.png" type="image/png" sizes="64x64" />
+	<link rel="icon" href="/favicon-512.png" type="image/png" sizes="512x512" />
+	<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 	<title>ZEN CODE 2026 | Hackathon &amp; Pitch Fest Registration</title>
 	<meta name="description" content="Official registration page for ZEN CODE 2026 Hackathon and Pitch Fest. Register your team now." />
 	<link rel="preconnect" href="https://fonts.googleapis.com" />

@@ -18,7 +18,9 @@
     maxMembers,
     idPrefix,
     submitLabel,
-    admissionPlaceholder = 'e.g. 25CAPMCA001'
+    admissionPlaceholder = 'e.g. 25CAPMCA001',
+    /** Pitch Fest teams don't have a team name. */
+    askTeamName = true
   } = $props();
 
   let nextKey = 0;
@@ -101,12 +103,14 @@
     let hasError = false;
 
     const trimmedTeamName = teamName.trim();
-    teamNameError = !trimmedTeamName
+    teamNameError = !askTeamName
+      ? ''
+      : !trimmedTeamName
       ? 'Team name is required.'
       : trimmedTeamName.length < 2
         ? 'Team name must be at least 2 characters.'
-        : trimmedTeamName.length > 50
-          ? 'Team name must be 50 characters or fewer.'
+        : trimmedTeamName.length > 35
+          ? 'Team name must be 35 characters or fewer.'
           : '';
     if (teamNameError) hasError = true;
 
@@ -213,7 +217,7 @@
     }
 
     pending = {
-      teamName: teamName.trim().replace(/\s+/g, ' '),
+      teamName: askTeamName ? teamName.trim().replace(/\s+/g, ' ') : '',
       teamLeader: { ...leaderDetails, mobileNumber: normalizeMobile(members[0].mobile) },
       members: membersList
     };
@@ -309,6 +313,7 @@
         </div>
       {/if}
 
+      {#if askTeamName}
       <div class="team-details">
         <div class="form-group">
           <label class="form-label" for={`${idPrefix}-team-name`}>
@@ -321,7 +326,7 @@
             class:input-error={teamNameError}
             placeholder="e.g. Code Crusaders"
             autocomplete="off"
-            maxlength="50"
+            maxlength="35"
             bind:value={teamName}
             disabled={isSubmitting || isChecking}
           />
@@ -332,6 +337,7 @@
           {/if}
         </div>
       </div>
+      {/if}
 
       <div class="section-header">
         <h4 class="section-heading">TEAM MEMBERS</h4>
