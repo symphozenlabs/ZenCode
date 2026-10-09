@@ -27,3 +27,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# SvelteKit
+.svelte-kit
+build
+/package
+
+# Vercel build output
+.vercel

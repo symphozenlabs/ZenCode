@@ -3,8 +3,9 @@ import {
   getFirestore, 
   serverTimestamp, 
   collection, 
-  addDoc, 
-  getDocs 
+  doc,
+  getDocs,
+  writeBatch
 } from 'firebase/firestore';
 
 // Read Firebase client configuration safely across Vite dev, build, and Node contexts
@@ -28,8 +29,28 @@ export const db = getFirestore(app);
 
 export const COLLECTIONS = {
   HACKATHON: 'hackathon_registered_participants',
-  PITCH_FEST: 'pitchfest_registered_participants'
+  PITCH_FEST: 'pitchfest_registered_participants',
+  // Admin-only contact details, keyed by the registration's document ID.
+  // Registrations themselves are publicly readable, so phone numbers live here.
+  CONTACTS: 'registration_contacts'
 };
+
+/**
+ * Saves a registration together with its private contact document in one
+ * atomic write, so a team is never stored without its leader's mobile number.
+ */
+async function saveRegistration(collectionName, docPayload, mobileNumber) {
+  const regRef = doc(collection(db, collectionName));
+  const batch = writeBatch(db);
+  batch.set(regRef, docPayload);
+  batch.set(doc(db, COLLECTIONS.CONTACTS, regRef.id), {
+    event: docPayload.event,
+    mobileNumber: (mobileNumber || '').trim(),
+    createdAt: serverTimestamp()
+  });
+  await batch.commit();
+  return regRef.id;
+}
 
 /**
  * Checks if any given admission number or email is already registered for an event.
@@ -49,6 +70,9 @@ export async function checkDuplicateRegistration(collectionName, eventName, admi
   
   for (const docSnap of snapshot.docs) {
     const data = docSnap.data();
+
+    // A rejected team frees its members to register again.
+    if (data.status === 'rejected') continue;
 
     // Collect all admissions in this document
     const docAdmissions = new Set();
@@ -109,7 +133,7 @@ export async function checkDuplicateRegistration(collectionName, eventName, admi
  * @returns {Promise<string>} Document ID
  */
 export async function registerHackathonTeam(registrationData) {
-  const { teamSize, teamLeader, members } = registrationData;
+  const { teamName, teamSize, teamLeader, members } = registrationData;
 
   const docPayload = {
     event: "Hackathon",
@@ -117,6 +141,7 @@ export async function registerHackathonTeam(registrationData) {
     qrGenerated: true,
     qrVersion: 1,
     confirmationEmailStatus: "pending",
+    teamName: (teamName || '').trim(),
     teamLeader: {
       name: teamLeader.name.trim(),
       admissionNumber: teamLeader.admissionNumber.trim(),
@@ -137,8 +162,7 @@ export async function registerHackathonTeam(registrationData) {
     _searchEmails: members.map(m => m.email.trim().toLowerCase())
   };
 
-  const docRef = await addDoc(collection(db, COLLECTIONS.HACKATHON), docPayload);
-  return docRef.id;
+  return saveRegistration(COLLECTIONS.HACKATHON, docPayload, teamLeader.mobileNumber);
 }
 
 /**
@@ -148,14 +172,15 @@ export async function registerHackathonTeam(registrationData) {
  * @returns {Promise<string>} Document ID
  */
 export async function registerPitchFestTeam(registrationData) {
-  const { teamLeader, members } = registrationData;
+  const { teamName, teamLeader, members } = registrationData;
 
   const docPayload = {
     event: "Pitch Fest",
-    teamSize: 2,
+    teamSize: members.length,
     qrGenerated: true,
     qrVersion: 1,
     confirmationEmailStatus: "pending",
+    teamName: (teamName || '').trim(),
     teamLeader: {
       name: teamLeader.name.trim(),
       admissionNumber: teamLeader.admissionNumber.trim(),
@@ -176,7 +201,6 @@ export async function registerPitchFestTeam(registrationData) {
     _searchEmails: members.map(m => m.email.trim().toLowerCase())
   };
 
-  const docRef = await addDoc(collection(db, COLLECTIONS.PITCH_FEST), docPayload);
-  return docRef.id;
+  return saveRegistration(COLLECTIONS.PITCH_FEST, docPayload, teamLeader.mobileNumber);
 }
 

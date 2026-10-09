@@ -4,6 +4,25 @@ import { sendTeamConfirmationEmails } from './email.js';
 
 const DEFAULT_PUBLIC_BASE_URL = 'https://zencode.symphozen.com';
 
+const EVENT_BY_COLLECTION = {
+  [COLLECTIONS.HACKATHON]: 'Hackathon',
+  [COLLECTIONS.PITCH_FEST]: 'Pitch Fest'
+};
+
+/** Auto-generated Firestore document IDs. */
+const FIRESTORE_ID = /^[A-Za-z0-9]{20}$/;
+
+/** Passes can only be sent this soon after the team registered. */
+const SEND_WINDOW_MS = 15 * 60 * 1000;
+
+const MAX_BODY_BYTES = 16 * 1024;
+
+function sendJson(res, status, body) {
+  res.statusCode = status;
+  res.setHeader('Content-Type', 'application/json');
+  res.end(JSON.stringify(body));
+}
+
 function normalizeBaseUrl(rawUrl) {
   const trimmed = (rawUrl || '').trim();
   if (!trimmed) return DEFAULT_PUBLIC_BASE_URL;
@@ -36,42 +55,41 @@ export async function handleSendConfirmationApi(req, res) {
   }
 
   let bodyStr = '';
+  let tooLarge = false;
   req.on('data', chunk => {
     bodyStr += chunk;
+    if (bodyStr.length > MAX_BODY_BYTES) tooLarge = true;
   });
 
   req.on('end', async () => {
+    if (tooLarge) return sendJson(res, 413, { error: 'Request too large' });
     try {
       const payload = JSON.parse(bodyStr || '{}');
-      const { collectionName, teamId, event, teamLeader, members } = payload;
+      const { collectionName, teamId } = payload;
 
-      if (!teamId) {
-        res.statusCode = 400;
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({ error: 'teamId is required' }));
-        return;
+      // Only the IDs are taken from the request. Names, emails and the team
+      // name always come from the stored registration, so this endpoint can't
+      // be used to send our passes to arbitrary addresses.
+      const eventName = EVENT_BY_COLLECTION[collectionName];
+      if (!eventName || typeof teamId !== 'string' || !FIRESTORE_ID.test(teamId)) {
+        return sendJson(res, 400, { error: 'A valid collectionName and teamId are required' });
       }
 
-      const eventName = event || (collectionName === COLLECTIONS.HACKATHON ? 'Hackathon' : 'Pitch Fest');
-
-      // Resolve team leader and member details from payload
-      let resolvedTeamLeader = teamLeader;
-      let resolvedMembers = Array.isArray(members) ? members : [];
-
-      // If payload did not include leader/members, try fallback to Firestore
-      if (!resolvedTeamLeader && resolvedMembers.length === 0 && collectionName) {
-        try {
-          const docRef = doc(db, collectionName, teamId);
-          const docSnap = await getDoc(docRef);
-          if (docSnap.exists()) {
-            const data = docSnap.data();
-            resolvedTeamLeader = data.teamLeader;
-            resolvedMembers = data.members || [];
-          }
-        } catch (fetchErr) {
-          console.warn('[REGISTRATION] Firestore fallback fetch skipped:', fetchErr.message);
-        }
+      const docSnap = await getDoc(doc(db, collectionName, teamId));
+      if (!docSnap.exists()) {
+        return sendJson(res, 404, { error: 'Registration not found' });
       }
+
+      const data = docSnap.data();
+      const registeredAt = typeof data.registeredAt?.toMillis === 'function' ? data.registeredAt.toMillis() : 0;
+      if (!registeredAt || Date.now() - registeredAt > SEND_WINDOW_MS) {
+        // Passes go out right after registering; older teams can't be re-mailed from here.
+        return sendJson(res, 409, { error: 'Confirmation window for this registration has closed' });
+      }
+
+      const resolvedTeamLeader = data.teamLeader;
+      const resolvedMembers = Array.isArray(data.members) ? data.members : [];
+      const resolvedTeamName = typeof data.teamName === 'string' ? data.teamName.trim() : '';
 
       // Count valid members
       const validMembersCount = (resolvedMembers.length > 0)
@@ -93,6 +111,7 @@ export async function handleSendConfirmationApi(req, res) {
       const emailOutcome = await sendTeamConfirmationEmails({
         teamId: teamId,
         event: eventName,
+        teamName: resolvedTeamName,
         teamLeader: resolvedTeamLeader,
         members: resolvedMembers,
         baseUrl: baseUrl
@@ -110,10 +129,7 @@ export async function handleSendConfirmationApi(req, res) {
       console.error('❌ [REGISTRATION ERROR] Error handling send-confirmation API:', err);
       res.statusCode = 500;
       res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({
-        error: 'Failed to process confirmation email',
-        details: err.message
-      }));
+      res.end(JSON.stringify({ error: 'Failed to process confirmation email' }));
     }
   });
 }

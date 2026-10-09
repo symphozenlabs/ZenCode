@@ -1,6 +1,53 @@
 rules_version = '2';
+
+// ZenCode access boundaries.
+// - Registration (the public site from main): anyone may create a valid
+//   registration and read registrations (the form checks duplicates in the
+//   browser). The create checks below are main's, unchanged.
+// - Admins are the organiser account (ADMIN_EMAIL in .env — rules can't read
+//   .env, so keep the email below in sync with it), or users with a document
+//   at /admins/{uid} (created via `npm run grant-admin`). Admins can review,
+//   edit and delete registrations, edit event settings and run live games.
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn() && (
+        (request.auth.token.email == 'admin@gmail.com'
+          && request.auth.token.firebase.sign_in_provider == 'password')
+        || exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // Team name and leader mobile are optional so older clients keep working,
+    // but when sent they must be sensible.
+    function validTeamExtras(data) {
+      return (!('teamName' in data)
+          || (data.teamName is string && data.teamName.size() >= 2 && data.teamName.size() <= 50))
+        // Phone numbers belong in registration_contacts, never in the public doc.
+        && !('mobileNumber' in data.teamLeader);
+    }
+
+    // A contact doc may only be created in the same write as the registration
+    // it belongs to (it exists after the batch but not before).
+    function isNewRegistration(collectionName, teamId) {
+      return existsAfter(/databases/$(database)/documents/$(collectionName)/$(teamId))
+        && !exists(/databases/$(database)/documents/$(collectionName)/$(teamId));
+    }
+
+    function isValidContact(data, teamId) {
+      return data.keys().hasOnly(['event', 'mobileNumber', 'createdAt'])
+        && data.mobileNumber is string && data.mobileNumber.matches('[6-9][0-9]{9}')
+        && data.createdAt == request.time
+        && (
+          (data.event == 'Hackathon' && isNewRegistration('hackathon_registered_participants', teamId))
+          || (data.event == 'Pitch Fest' && isNewRegistration('pitchfest_registered_participants', teamId))
+        );
+    }
+
     // Helper function to validate Hackathon registration payload
     function isValidHackathon(data) {
       return data.event == 'Hackathon'
@@ -13,6 +60,8 @@ service cloud.firestore {
           (data.teamLeader.classSection is string && data.teamLeader.classSection.size() > 0)
         )
         && data.teamLeader.email is string && data.teamLeader.email.size() > 0
+        && validTeamExtras(data)
+        && data.teamLeader.admissionNumber.upper().matches('2[56]CAPMCA[0-9]{3}')
         && data.members is list
         && data.members.size() == data.teamSize
         && data.registeredAt == request.time;
@@ -21,7 +70,7 @@ service cloud.firestore {
     // Helper function to validate Pitch Fest registration payload
     function isValidPitchFest(data) {
       return data.event == 'Pitch Fest'
-        && data.teamSize == 2
+        && (data.teamSize == 1 || data.teamSize == 2)
         && data.teamLeader is map
         && data.teamLeader.name is string && data.teamLeader.name.size() > 0
         && data.teamLeader.admissionNumber is string && data.teamLeader.admissionNumber.size() > 0
@@ -30,21 +79,84 @@ service cloud.firestore {
           (data.teamLeader.classSection is string && data.teamLeader.classSection.size() > 0)
         )
         && data.teamLeader.email is string && data.teamLeader.email.size() > 0
+        && validTeamExtras(data)
+        && data.teamLeader.admissionNumber.upper().matches('2[56]CAPMCA[0-9]{3}')
         && data.members is list
-        && data.members.size() == 2
+        && data.members.size() == data.teamSize
         && data.registeredAt == request.time;
+    }
+
+    // Admin edits must keep the event and original registration time.
+    function isValidAdminUpdate() {
+      return request.resource.data.event == resource.data.event
+        && request.resource.data.registeredAt == resource.data.registeredAt
+        && (!('status' in request.resource.data)
+            || request.resource.data.status in ['approved', 'rejected']);
     }
 
     match /hackathon_registered_participants/{docId} {
       allow read: if true;
       allow create: if isValidHackathon(request.resource.data);
-      allow update, delete: if false;
+      allow update: if isAdmin() && isValidAdminUpdate();
+      allow delete: if isAdmin();
     }
 
     match /pitchfest_registered_participants/{docId} {
       allow read: if true;
       allow create: if isValidPitchFest(request.resource.data);
-      allow update, delete: if false;
+      allow update: if isAdmin() && isValidAdminUpdate();
+      allow delete: if isAdmin();
+    }
+
+    match /registration_contacts/{teamId} {
+      allow create: if isAdmin() || isValidContact(request.resource.data, teamId);
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /admins/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow write: if false;
+    }
+
+    // Event configuration edited from the admin settings page.
+    match /config/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Tech Word Rush question bank — organisers only. The server reads it
+    // (signed in as the organiser) when a session is created.
+    match /techWordRushQuestions/{id} {
+      allow read: if isAdmin();
+      allow create, update: if isAdmin()
+        && request.resource.data.word is string
+        && request.resource.data.word.matches('^[A-Z]{3,20}$')
+        && request.resource.data.description is string
+        && request.resource.data.description.size() > 0;
+      allow delete: if isAdmin();
+    }
+
+    // Live games. Participants have no accounts, so every write (joining,
+    // hints, guesses, scoring, session control) goes through the server, which
+    // is signed in as the organiser. Players may only read public state: the
+    // session doc never holds the current word until the answer is revealed.
+    match /liveSessions/{code} {
+      allow get: if true;
+      allow list, write: if isAdmin();
+
+      match /players/{playerId} {
+        allow get: if true;
+        allow list, write: if isAdmin();
+      }
+
+      // Words, device tokens and guesses — never readable by players.
+      match /{private}/{docId} {
+        allow read, write: if isAdmin() && private in ['secret', 'playerState', 'names'];
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
