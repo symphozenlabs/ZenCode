@@ -1,8 +1,8 @@
 rules_version = '2';
 
 // ZenCode access boundaries.
-// - Admins are the hard-coded admin@gmail.com account (src/lib/config/admin.ts),
-//   or users with a document at /admins/{uid} (created via `npm run grant-admin`).
+// - Admins are the organiser account (ADMIN_EMAIL in .env — rules can't read
+//   .env, so keep the email below in sync with it), or users with a document at /admins/{uid} (created via `npm run grant-admin`).
 // - Registrations live in one collection per event. The public form may only
 //   create a valid registration (auto-approved); admins can reject, edit and delete.
 service cloud.firestore {
@@ -63,7 +63,7 @@ service cloud.firestore {
     }
 
     match /admins/{uid} {
-      allow read: if signedIn() && request.auth.uid == uid;
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
       allow write: if false;
     }
 
@@ -88,6 +88,37 @@ service cloud.firestore {
       allow create: if isValidPitchFest(request.resource.data);
       allow update: if isAdmin() && isValidAdminUpdate();
       allow delete: if isAdmin();
+    }
+
+    // Tech Word Rush question bank — organisers only. The server reads it
+    // (signed in as the organiser) when a session is created.
+    match /techWordRushQuestions/{id} {
+      allow read: if isAdmin();
+      allow create, update: if isAdmin()
+        && request.resource.data.word is string
+        && request.resource.data.word.matches('^[A-Z]{3,20}$')
+        && request.resource.data.description is string
+        && request.resource.data.description.size() > 0;
+      allow delete: if isAdmin();
+    }
+
+    // Live games. Participants have no accounts, so every write (joining,
+    // hints, answers, scoring, session control) goes through the server, which
+    // is signed in as the organiser. Players may only read public state: the
+    // session doc never holds the current word until the question ends.
+    match /liveSessions/{code} {
+      allow get: if true;
+      allow list, write: if isAdmin();
+
+      match /players/{playerId} {
+        allow get: if true;
+        allow list, write: if isAdmin();
+      }
+
+      // Words, device tokens and revealed letters — never readable by players.
+      match /{private}/{docId} {
+        allow read, write: if isAdmin() && private in ['secret', 'playerState', 'names'];
+      }
     }
 
     match /{document=**} {

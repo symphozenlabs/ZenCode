@@ -19,8 +19,11 @@ if (existsSync('.env')) {
 }
 const env = process.env;
 const BASE = env.BASE_URL ?? 'http://localhost:5173';
-const ADMIN_EMAIL = 'admin@gmail.com';
-const ADMIN_PASSWORD = 'admin@123';
+const { ADMIN_EMAIL, ADMIN_PASSWORD } = env;
+if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
+	console.error('Set ADMIN_EMAIL and ADMIN_PASSWORD in .env first.');
+	process.exit(1);
+}
 const COLLECTIONS = {
 	hackathon: 'hackathon_registered_participants',
 	'pitch-fest': 'pitchfest_registered_participants'

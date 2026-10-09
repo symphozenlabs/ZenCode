@@ -7,6 +7,7 @@
 		LayoutDashboard,
 		Code2,
 		Presentation,
+		Gamepad2,
 		Settings,
 		LogOut,
 		Menu,
@@ -30,7 +31,8 @@
 			label: 'Events',
 			items: [
 				{ href: '/admin/hackathon', label: 'Hackathon', icon: Code2 },
-				{ href: '/admin/pitch-fest', label: 'Pitch Fest', icon: Presentation }
+				{ href: '/admin/pitch-fest', label: 'Pitch Fest', icon: Presentation },
+				{ href: '/admin/games', label: 'Games', icon: Gamepad2 }
 			]
 		},
 		{

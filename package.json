@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "prepare": "svelte-kit sync || echo ''",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "test:games": "node --experimental-strip-types --no-warnings --test scripts/test-tech-word-rush.mjs",
     "grant-admin": "node scripts/grant-admin.mjs",
     "db:check": "node scripts/db-check.mjs"
   },
@@ -26,6 +27,7 @@
   "dependencies": {
     "@lucide/svelte": "^1.53.0",
     "firebase": "^12.19.0",
-    "firebase-admin": "^13.10.0"
+    "firebase-admin": "^13.10.0",
+    "qrcode-generator": "^2.0.4"
   }
 }

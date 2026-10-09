@@ -7,6 +7,9 @@
 	let { children } = $props();
 
 	const isLogin = $derived(page.url.pathname === '/admin/login');
+	// Presenter screens are projected full-screen, so they skip the admin shell
+	// (but keep the same admin check below).
+	const isPresenter = $derived(page.url.pathname.startsWith('/admin/games/tech-word-rush/live/'));
 
 	adminAuth.start();
 
@@ -30,6 +33,8 @@
 </svelte:head>
 
 {#if isLogin}
+	{@render children()}
+{:else if adminAuth.status === 'admin' && isPresenter}
 	{@render children()}
 {:else if adminAuth.status === 'admin'}
 	{#await loadShell()}

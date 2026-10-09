@@ -1,13 +1,6 @@
 import { browser } from '$app/environment';
-import {
-	createUserWithEmailAndPassword,
-	onAuthStateChanged,
-	signInWithEmailAndPassword,
-	signOut,
-	type User
-} from 'firebase/auth';
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut, type User } from 'firebase/auth';
 import { auth } from '$lib/firebase/auth';
-import { ADMIN_EMAIL, ADMIN_PASSWORD } from '$lib/config/admin';
 
 export type AuthStatus = 'loading' | 'signed-out' | 'not-admin' | 'admin' | 'unconfigured';
 
@@ -35,40 +28,32 @@ class AdminAuth {
 		}
 	}
 
+	/** The server decides: the .env organiser account, or a user listed in /admins. */
 	async #isAdmin(user: User) {
-		if (user.email?.toLowerCase() === ADMIN_EMAIL) return true;
 		try {
-			// Loaded on demand: the hard-coded admin never needs Firestore to sign in.
-			const [{ doc, getDoc }, { db }] = await Promise.all([
-				import('firebase/firestore'),
-				import('$lib/firebase/client')
-			]);
-			const snap = await getDoc(doc(db(), 'admins', user.uid));
-			return snap.exists();
+			const token = await user.getIdToken();
+			const res = await fetch('/api/admin/check', { headers: { authorization: `Bearer ${token}` } });
+			return res.ok;
 		} catch {
 			return false;
 		}
 	}
 
 	async signIn(email: string, password: string) {
-		if (email.toLowerCase() !== ADMIN_EMAIL || password !== ADMIN_PASSWORD) {
-			throw Object.assign(new Error('bad-credentials'), { code: 'auth/invalid-credential' });
-		}
 		let cred;
 		try {
-			cred = await signInWithEmailAndPassword(auth(), ADMIN_EMAIL, ADMIN_PASSWORD);
+			cred = await signInWithEmailAndPassword(auth(), email, password);
 		} catch (err) {
 			const code = (err as { code?: string }).code;
 			if (code !== 'auth/invalid-credential' && code !== 'auth/user-not-found') throw err;
-			// First sign-in: create the Firebase Auth account for the hard-coded admin.
-			try {
-				cred = await createUserWithEmailAndPassword(auth(), ADMIN_EMAIL, ADMIN_PASSWORD);
-			} catch (createErr) {
-				if ((createErr as { code?: string }).code === 'auth/email-already-in-use') {
-					throw Object.assign(new Error('admin-password-mismatch'), { code: 'zencode/admin-mismatch' });
-				}
-				throw createErr;
-			}
+			// First sign-in: the server creates the organiser account if this login matches .env.
+			const res = await fetch('/api/admin/setup', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ email, password })
+			}).catch(() => null);
+			if (!res?.ok) throw err;
+			cred = await signInWithEmailAndPassword(auth(), email, password);
 		}
 		const ok = await this.#isAdmin(cred.user);
 		if (!ok) {
@@ -101,8 +86,6 @@ export function authErrorMessage(err: unknown): string {
 			return 'This account has been disabled.';
 		case 'auth/operation-not-allowed':
 			return 'Email/Password sign-in is turned off in Firebase (Authentication → Sign-in method).';
-		case 'zencode/admin-mismatch':
-			return 'The admin account exists in Firebase with a different password. Reset or delete it in the Firebase console.';
 		case 'zencode/not-admin':
 			return "This account doesn't have organiser access.";
 		default:
