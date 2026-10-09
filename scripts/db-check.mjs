@@ -30,10 +30,10 @@ const COLLECTIONS = {
 };
 
 const app = initializeApp({
-	apiKey: env.PUBLIC_FIREBASE_API_KEY,
-	authDomain: env.PUBLIC_FIREBASE_AUTH_DOMAIN,
-	projectId: env.PUBLIC_FIREBASE_PROJECT_ID,
-	appId: env.PUBLIC_FIREBASE_APP_ID
+	apiKey: env.VITE_FIREBASE_API_KEY,
+	authDomain: env.VITE_FIREBASE_AUTH_DOMAIN,
+	projectId: env.VITE_FIREBASE_PROJECT_ID,
+	appId: env.VITE_FIREBASE_APP_ID
 });
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -81,7 +81,7 @@ function payload(event, size) {
 	};
 }
 
-console.log(`\nZenCode database check — project ${env.PUBLIC_FIREBASE_PROJECT_ID}\n`);
+console.log(`\nZenCode database check — project ${env.VITE_FIREBASE_PROJECT_ID}\n`);
 
 // ---- Public (signed out), exactly like the registration form ----
 await step('Public Hackathon registration', async () => {

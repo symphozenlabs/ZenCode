@@ -1,10 +1,13 @@
 rules_version = '2';
 
 // ZenCode access boundaries.
+// - Registration (the public site from main): anyone may create a valid
+//   registration and read registrations (the form checks duplicates in the
+//   browser). The create checks below are main's, unchanged.
 // - Admins are the organiser account (ADMIN_EMAIL in .env — rules can't read
-//   .env, so keep the email below in sync with it), or users with a document at /admins/{uid} (created via `npm run grant-admin`).
-// - Registrations live in one collection per event. The public form may only
-//   create a valid registration (auto-approved); admins can reject, edit and delete.
+//   .env, so keep the email below in sync with it), or users with a document
+//   at /admins/{uid} (created via `npm run grant-admin`). Admins can review,
+//   edit and delete registrations, edit event settings and run live games.
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() {
@@ -19,39 +22,38 @@ service cloud.firestore {
       );
     }
 
-    function isValidLeader(leader) {
-      return leader is map
-        && leader.name is string && leader.name.size() > 0
-        && leader.admissionNumber is string && leader.admissionNumber.size() > 0
-        && leader.classSection is string && leader.classSection.size() > 0
-        && leader.email is string && leader.email.size() > 0;
-    }
-
-    // New registrations are auto-approved (older docs had no status).
-    function startsApproved(data) {
-      return !('status' in data) || data.status == 'approved';
-    }
-
-    // Hackathon: teams of 3 or 4 (members includes the leader)
+    // Helper function to validate Hackathon registration payload
     function isValidHackathon(data) {
       return data.event == 'Hackathon'
         && (data.teamSize == 3 || data.teamSize == 4)
-        && isValidLeader(data.teamLeader)
+        && data.teamLeader is map
+        && data.teamLeader.name is string && data.teamLeader.name.size() > 0
+        && data.teamLeader.admissionNumber is string && data.teamLeader.admissionNumber.size() > 0
+        && (
+          (data.teamLeader.yearOfStudy is string && data.teamLeader.yearOfStudy.size() > 0) ||
+          (data.teamLeader.classSection is string && data.teamLeader.classSection.size() > 0)
+        )
+        && data.teamLeader.email is string && data.teamLeader.email.size() > 0
         && data.members is list
         && data.members.size() == data.teamSize
-        && data.registeredAt == request.time
-        && startsApproved(data);
+        && data.registeredAt == request.time;
     }
 
-    // Pitch Fest: teams of exactly 2
+    // Helper function to validate Pitch Fest registration payload
     function isValidPitchFest(data) {
       return data.event == 'Pitch Fest'
         && data.teamSize == 2
-        && isValidLeader(data.teamLeader)
+        && data.teamLeader is map
+        && data.teamLeader.name is string && data.teamLeader.name.size() > 0
+        && data.teamLeader.admissionNumber is string && data.teamLeader.admissionNumber.size() > 0
+        && (
+          (data.teamLeader.yearOfStudy is string && data.teamLeader.yearOfStudy.size() > 0) ||
+          (data.teamLeader.classSection is string && data.teamLeader.classSection.size() > 0)
+        )
+        && data.teamLeader.email is string && data.teamLeader.email.size() > 0
         && data.members is list
         && data.members.size() == 2
-        && data.registeredAt == request.time
-        && startsApproved(data);
+        && data.registeredAt == request.time;
     }
 
     // Admin edits must keep the event and original registration time.
@@ -62,20 +64,6 @@ service cloud.firestore {
             || request.resource.data.status in ['approved', 'rejected']);
     }
 
-    match /admins/{uid} {
-      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
-      allow write: if false;
-    }
-
-    // Public event configuration (dates, venue, tracks, schedule, rules).
-    match /config/{docId} {
-      allow read: if true;
-      allow write: if isAdmin();
-    }
-
-    // NOTE: read is public because the registration form checks for duplicate
-    // admission numbers/emails in the browser. This exposes participant
-    // details to anyone; move the duplicate check server-side to lock it down.
     match /hackathon_registered_participants/{docId} {
       allow read: if true;
       allow create: if isValidHackathon(request.resource.data);
@@ -88,6 +76,17 @@ service cloud.firestore {
       allow create: if isValidPitchFest(request.resource.data);
       allow update: if isAdmin() && isValidAdminUpdate();
       allow delete: if isAdmin();
+    }
+
+    match /admins/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow write: if false;
+    }
+
+    // Event configuration edited from the admin settings page.
+    match /config/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
 
     // Tech Word Rush question bank — organisers only. The server reads it
@@ -103,9 +102,9 @@ service cloud.firestore {
     }
 
     // Live games. Participants have no accounts, so every write (joining,
-    // hints, answers, scoring, session control) goes through the server, which
+    // hints, guesses, scoring, session control) goes through the server, which
     // is signed in as the organiser. Players may only read public state: the
-    // session doc never holds the current word until the question ends.
+    // session doc never holds the current word until the answer is revealed.
     match /liveSessions/{code} {
       allow get: if true;
       allow list, write: if isAdmin();
@@ -115,7 +114,7 @@ service cloud.firestore {
         allow list, write: if isAdmin();
       }
 
-      // Words, device tokens and revealed letters — never readable by players.
+      // Words, device tokens and guesses — never readable by players.
       match /{private}/{docId} {
         allow read, write: if isAdmin() && private in ['secret', 'playerState', 'names'];
       }

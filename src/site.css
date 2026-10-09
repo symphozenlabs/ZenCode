@@ -1,8 +1,3 @@
-/*
- * Registration form styles (from the pavithra branch's src/app.css).
- * Global resets were removed — the site's base styles (src/app.css) apply.
- * Imported only by RegistrationPage.svelte.
- */
 :root {
   /* SymphoServe Forest Green Palette */
   --forest-900: #133a29;
@@ -46,9 +41,32 @@
   --radius-badge: 4px;
 }
 
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
 
+html, body {
+  min-height: 100%;
+  font-family: var(--font-family);
+  color: var(--text-primary);
+  background-color: var(--bg-page);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
 
+/* Base utility & typography */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-family);
+  color: var(--text-primary);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
 
+button, input, select, textarea {
+  font-family: inherit;
+}
 
 /* Forms & Inputs */
 .form-group {
@@ -92,6 +110,17 @@
   border-radius: var(--radius-input);
   outline: none;
   transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.form-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23647064' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 16px;
+  padding-right: 36px;
+  cursor: pointer;
 }
 
 .form-input::placeholder {
@@ -154,7 +183,17 @@
   margin-top: 1px;
 }
 
-.registration-root {
-  font-family: var(--font-family);
-  color: var(--text-primary);
+/* Focus visibility */
+:focus-visible {
+  outline: 2px solid var(--support-green);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

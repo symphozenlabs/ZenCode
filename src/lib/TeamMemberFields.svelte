@@ -1,14 +1,15 @@
 <script>
   let {
     memberNumber = 1,
-    idPrefix = 'm',
     title = '',
     roleBadge = '',
     name = $bindable(''),
     admissionNumber = $bindable(''),
+    yearOfStudy = $bindable(''),
     email = $bindable(''),
     nameReadOnly = false,
     admissionReadOnly = false,
+    yearReadOnly = false,
     emailReadOnly = false,
     errors = {},
     disabled = false
@@ -29,14 +30,14 @@
   <div class="member-fields-grid">
     <!-- Name Field -->
     <div class="form-group">
-      <label class="form-label" for={`${idPrefix}${memberNumber}-name`}>
+      <label class="form-label" for={`m${memberNumber}-name`}>
         <span>Name <span class="required-mark">*</span></span>
         {#if nameReadOnly}
           <span class="auto-badge">Auto</span>
         {/if}
       </label>
       <input
-        id={`${idPrefix}${memberNumber}-name`}
+        id={`m${memberNumber}-name`}
         type="text"
         class="form-input"
         class:input-error={errors.name}
@@ -52,14 +53,14 @@
 
     <!-- Admission Number Field -->
     <div class="form-group">
-      <label class="form-label" for={`${idPrefix}${memberNumber}-adm`}>
+      <label class="form-label" for={`m${memberNumber}-adm`}>
         <span>Admission Number <span class="required-mark">*</span></span>
         {#if admissionReadOnly}
           <span class="auto-badge">Auto</span>
         {/if}
       </label>
       <input
-        id={`${idPrefix}${memberNumber}-adm`}
+        id={`m${memberNumber}-adm`}
         type="text"
         class="form-input"
         class:input-error={errors.admissionNumber}
@@ -73,16 +74,51 @@
       {/if}
     </div>
 
+    <!-- Year of Study Field -->
+    <div class="form-group">
+      <label class="form-label" for={`m${memberNumber}-year`}>
+        <span>Year of Study <span class="required-mark">*</span></span>
+        {#if yearReadOnly}
+          <span class="auto-badge">Auto</span>
+        {/if}
+      </label>
+      {#if yearReadOnly}
+        <input
+          id={`m${memberNumber}-year`}
+          type="text"
+          class="form-input"
+          value={yearOfStudy || 'Select Year'}
+          readonly
+          {disabled}
+        />
+      {:else}
+        <select
+          id={`m${memberNumber}-year`}
+          class="form-input form-select"
+          class:input-error={errors.yearOfStudy}
+          bind:value={yearOfStudy}
+          {disabled}
+        >
+          <option value="" disabled selected>Select Year</option>
+          <option value="PG 1st Year">PG 1st Year</option>
+          <option value="PG 2nd Year">PG 2nd Year</option>
+        </select>
+      {/if}
+      {#if errors.yearOfStudy}
+        <span class="field-error-msg">{errors.yearOfStudy}</span>
+      {/if}
+    </div>
+
     <!-- Email ID Field -->
-    <div class="form-group full-width">
-      <label class="form-label" for={`${idPrefix}${memberNumber}-email`}>
+    <div class="form-group">
+      <label class="form-label" for={`m${memberNumber}-email`}>
         <span>Email ID <span class="required-mark">*</span></span>
         {#if emailReadOnly}
           <span class="auto-badge">Auto</span>
         {/if}
       </label>
       <input
-        id={`${idPrefix}${memberNumber}-email`}
+        id={`m${memberNumber}-email`}
         type="email"
         class="form-input"
         class:input-error={errors.email}
@@ -170,10 +206,6 @@
     display: grid;
     grid-template-columns: repeat(2, 1fr);
     gap: 10px 14px;
-  }
-
-  .full-width {
-    grid-column: 1 / -1;
   }
 
   @media (max-width: 640px) {

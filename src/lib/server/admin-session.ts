@@ -2,7 +2,7 @@ import { env as priv } from '$env/dynamic/private';
 import { env as pub } from '$env/dynamic/public';
 import { error } from '@sveltejs/kit';
 import { timingSafeEqual } from 'node:crypto';
-import { getApp, initializeApp, type FirebaseApp } from 'firebase/app';
+import { getApp, getApps, initializeApp, type FirebaseApp } from 'firebase/app';
 import {
 	connectAuthEmulator,
 	createUserWithEmailAndPassword,
@@ -25,22 +25,23 @@ export const NOT_CONFIGURED = 'Live games need ADMIN_EMAIL and ADMIN_PASSWORD in
 const adminEmail = () => (priv.ADMIN_EMAIL ?? '').trim().toLowerCase();
 
 export function adminConfigured() {
-	return Boolean(adminEmail() && priv.ADMIN_PASSWORD && pub.PUBLIC_FIREBASE_API_KEY && pub.PUBLIC_FIREBASE_PROJECT_ID);
+	return Boolean(adminEmail() && priv.ADMIN_PASSWORD && pub.VITE_FIREBASE_API_KEY && pub.VITE_FIREBASE_PROJECT_ID);
 }
 
 function app(): FirebaseApp {
 	try {
 		return getApp(APP_NAME);
 	} catch {
-		const created = initializeApp(
-			{
-				apiKey: pub.PUBLIC_FIREBASE_API_KEY,
-				authDomain: pub.PUBLIC_FIREBASE_AUTH_DOMAIN,
-				projectId: pub.PUBLIC_FIREBASE_PROJECT_ID,
-				appId: pub.PUBLIC_FIREBASE_APP_ID
-			},
-			APP_NAME
-		);
+		const config = {
+			apiKey: pub.VITE_FIREBASE_API_KEY,
+			authDomain: pub.VITE_FIREBASE_AUTH_DOMAIN,
+			projectId: pub.VITE_FIREBASE_PROJECT_ID,
+			appId: pub.VITE_FIREBASE_APP_ID
+		};
+		// main's src/lib/firebase.js calls getApp() whenever any app exists, which
+		// throws if only this named one does — so keep a default app alongside it.
+		if (!getApps().some((a) => a.name === '[DEFAULT]')) initializeApp(config);
+		const created = initializeApp(config, APP_NAME);
 		// Local testing against the Firebase emulators.
 		if (priv.FIREBASE_AUTH_EMULATOR_HOST) {
 			connectAuthEmulator(getAuth(created), `http://${priv.FIREBASE_AUTH_EMULATOR_HOST}`, { disableWarnings: true });
@@ -120,7 +121,7 @@ async function verifyIdToken(idToken: string): Promise<VerifiedUser | null> {
 	const base = priv.FIREBASE_AUTH_EMULATOR_HOST
 		? `http://${priv.FIREBASE_AUTH_EMULATOR_HOST}/identitytoolkit.googleapis.com`
 		: 'https://identitytoolkit.googleapis.com';
-	const res = await fetch(`${base}/v1/accounts:lookup?key=${pub.PUBLIC_FIREBASE_API_KEY}`, {
+	const res = await fetch(`${base}/v1/accounts:lookup?key=${pub.VITE_FIREBASE_API_KEY}`, {
 		method: 'POST',
 		headers: { 'content-type': 'application/json' },
 		body: JSON.stringify({ idToken })
@@ -130,7 +131,7 @@ async function verifyIdToken(idToken: string): Promise<VerifiedUser | null> {
 	if (!user) return null;
 	// The token was accepted above, so its claims can be trusted.
 	const claims = decodePayload(idToken) as { aud?: string; firebase?: { sign_in_provider?: string } };
-	if (claims.aud !== pub.PUBLIC_FIREBASE_PROJECT_ID) return null;
+	if (claims.aud !== pub.VITE_FIREBASE_PROJECT_ID) return null;
 	return { uid: user.localId, email: (user.email ?? '').toLowerCase(), provider: claims.firebase?.sign_in_provider ?? '' };
 }
 

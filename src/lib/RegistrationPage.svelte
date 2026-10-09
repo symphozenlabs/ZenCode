@@ -1,20 +1,9 @@
 <script>
-  import { untrack } from 'svelte';
-  import './registration.css';
   import HackathonRegistration from './HackathonRegistration.svelte';
   import PitchFestRegistration from './PitchFestRegistration.svelte';
 
-  /**
-   * initialEvent: 'hackathon' | 'pitchfest' (from ?event=)
-   * closed: which events are not accepting registrations (from admin settings)
-   */
-  let {
-    initialEvent = 'hackathon',
-    closed = { hackathon: false, pitchfest: false }
-  } = $props();
-
   // Event selection state: 'hackathon' | 'pitchfest'
-  let activeEvent = $state(untrack(() => initialEvent) === 'pitchfest' ? 'pitchfest' : 'hackathon');
+  let activeEvent = $state('hackathon');
 
   // Track pane heights for smooth height transition
   let hackathonHeight = $state(0);
@@ -31,23 +20,17 @@
   }
 </script>
 
-<div class="page-container registration-root">
-  <!-- COMPACT BRANDED HEADER / HERO -->
+<div class="page-container">
+  <!-- Minimal branded header -->
   <header class="header-hero">
     <div class="header-inner">
-      <div class="eyebrow-row">
-        <span class="gold-dot"></span>
+      <img src="/logo.png" alt="ZEN CODE Logo" class="brand-logo" />
+
+      <div class="header-copy">
         <span class="eyebrow-text">ZEN CODE 2026</span>
-        <span class="gold-dot"></span>
+        <h1 class="header-title">Hackathon &amp; Pitch Fest</h1>
+        <p class="header-desc">Register your team and be part of ZEN CODE 2026.</p>
       </div>
-
-      <h1 class="header-title">Hackathon &amp; Pitch Fest</h1>
-
-      <div class="gold-accent-rule"></div>
-
-      <p class="header-desc">
-        Register your team and be part of ZEN CODE 2026.
-      </p>
     </div>
   </header>
 
@@ -113,14 +96,7 @@
             bind:clientHeight={hackathonHeight}
             inert={activeEvent !== 'hackathon' ? true : undefined}
           >
-            {#if closed.hackathon}
-              <div class="closed-notice" role="status">
-                <p class="closed-title">Hackathon registration is closed</p>
-                <p class="closed-desc">This event is not accepting new teams right now.</p>
-              </div>
-            {:else}
-              <HackathonRegistration />
-            {/if}
+            <HackathonRegistration />
           </div>
 
           <!-- PITCH FEST SLIDE PANE -->
@@ -132,91 +108,89 @@
             bind:clientHeight={pitchfestHeight}
             inert={activeEvent !== 'pitchfest' ? true : undefined}
           >
-            {#if closed.pitchfest}
-              <div class="closed-notice" role="status">
-                <p class="closed-title">Pitch Fest registration is closed</p>
-                <p class="closed-desc">This event is not accepting new teams right now.</p>
-              </div>
-            {:else}
-              <PitchFestRegistration />
-            {/if}
+            <PitchFestRegistration />
           </div>
         </div>
       </div>
     </div>
   </main>
 
+  <!-- COMPACT FOOTER -->
+  <footer class="page-footer">
+    <div class="footer-inner">
+      <p class="footer-title">
+        ZEN CODE 2026 &bull; Official Registration Portal
+      </p>
+      <p class="footer-note">
+        All submissions are recorded in the Firestore database. Duplicate registrations for the same event are restricted.
+      </p>
+    </div>
+  </footer>
 </div>
 
 <style>
   .page-container {
+    min-height: 100vh;
     display: flex;
     flex-direction: column;
     background-color: var(--bg-page);
     overflow-x: hidden;
   }
 
-  /* Compact Branded Header (Forest 800) */
+  /* Minimal Branded Header (Forest 800) */
   .header-hero {
     background-color: var(--forest-800);
     color: var(--text-white);
-    padding: calc(64px + 34px) 24px 28px 24px;
-    border-bottom: 3px solid var(--forest-700);
+    padding: 14px 20px;
+    border-bottom: 1px solid rgba(240, 196, 92, 0.38);
   }
 
   .header-inner {
     max-width: 1160px;
     margin: 0 auto;
-    text-align: center;
     display: flex;
-    flex-direction: column;
     align-items: center;
+    justify-content: center;
+    gap: 14px;
   }
 
-  .eyebrow-row {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 6px;
+  .brand-logo {
+    width: 46px;
+    height: auto;
+    object-fit: contain;
+    flex: 0 0 auto;
+    display: block;
   }
 
-  .gold-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background-color: var(--accent-gold);
+  .header-copy {
+    min-width: 0;
+    text-align: left;
   }
 
   .eyebrow-text {
-    font-size: 13px;
+    display: block;
+    font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0.12em;
-    color: #d1e2cb;
+    letter-spacing: 0.14em;
+    color: var(--accent-gold);
     text-transform: uppercase;
+    line-height: 1.2;
+    margin-bottom: 2px;
   }
 
   .header-title {
-    font-size: clamp(28px, 4.2vw, 40px);
+    font-size: clamp(22px, 3vw, 30px);
     font-weight: 700;
     color: var(--text-white);
-    letter-spacing: -0.02em;
-    line-height: 1.15;
-    margin-bottom: 10px;
-  }
-
-  .gold-accent-rule {
-    width: 44px;
-    height: 3px;
-    background-color: var(--accent-gold);
-    border-radius: 2px;
-    margin-bottom: 12px;
+    letter-spacing: 0;
+    line-height: 1.1;
   }
 
   .header-desc {
-    font-size: 15px;
+    font-size: 13px;
     color: #e1ede0;
-    max-width: 540px;
-    line-height: 1.5;
+    line-height: 1.35;
+    margin-top: 4px;
   }
 
   /* Main Registration Area: ONE Single Registration Container */
@@ -267,7 +241,7 @@
     width: calc(50% - 4px);
     background: var(--action-green);
     border-radius: 6px;
-    transition: transform 380ms cubic-bezier(0.4, 0, 0.2, 1);
+    transition: transform 450ms cubic-bezier(0.22, 1, 0.36, 1);
     box-shadow: 0 1px 3px rgba(24, 35, 26, 0.16);
   }
 
@@ -320,13 +294,13 @@
     width: 100%;
     overflow: hidden;
     position: relative;
-    transition: height 420ms cubic-bezier(0.4, 0, 0.2, 1);
+    transition: height 450ms cubic-bezier(0.22, 1, 0.36, 1);
   }
 
   .slider-track {
     display: flex;
     width: 200%;
-    transition: transform 450ms cubic-bezier(0.4, 0, 0.2, 1);
+    transition: transform 450ms cubic-bezier(0.22, 1, 0.36, 1);
     will-change: transform;
     align-items: flex-start;
   }
@@ -338,31 +312,51 @@
     padding: 24px 28px;
   }
 
-  /* Shown in place of a form when admin has closed registration */
-  .closed-notice {
-    padding: 40px 16px;
-    text-align: center;
+  /* Footer */
+  .page-footer {
+    background-color: #ffffff;
+    border-top: 1px solid var(--border-card);
+    padding: 24px 20px;
+    margin-top: auto;
   }
 
-  .closed-title {
-    font-size: 16px;
+  .footer-inner {
+    max-width: 1160px;
+    margin: 0 auto;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .footer-title {
+    font-size: 13px;
     font-weight: 600;
     color: var(--text-primary);
   }
 
-  .closed-desc {
-    margin-top: 4px;
-    font-size: 14px;
+  .footer-note {
+    font-size: 12px;
     color: var(--text-muted);
   }
 
   /* Mobile Responsive */
   @media (max-width: 640px) {
     .header-hero {
-      padding: calc(64px + 26px) 16px 22px 16px;
+      padding: 12px 14px;
+    }
+    .header-inner {
+      justify-content: flex-start;
+      gap: 10px;
+    }
+    .brand-logo {
+      width: 38px;
     }
     .header-title {
-      font-size: 28px;
+      font-size: 22px;
+    }
+    .header-desc {
+      font-size: 12px;
     }
     .main-content {
       padding: 16px 12px 40px 12px;
@@ -372,6 +366,15 @@
     }
     .slider-pane {
       padding: 18px 14px;
+    }
+  }
+
+  /* Reduced Motion Support */
+  @media (prefers-reduced-motion: reduce) {
+    .slider-track,
+    .slider-viewport,
+    .switcher-indicator {
+      transition: none !important;
     }
   }
 </style>

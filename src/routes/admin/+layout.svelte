@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { adminAuth } from '$lib/stores/admin-auth.svelte';
 	import Spinner from '$lib/components/ui/Spinner.svelte';
+	import AppHead from '$lib/components/ui/AppHead.svelte';
 
 	let { children } = $props();
 
@@ -27,6 +28,8 @@
 		}
 	});
 </script>
+
+<AppHead />
 
 <svelte:head>
 	<meta name="robots" content="noindex" />

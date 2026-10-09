@@ -3,6 +3,7 @@
     eventTitle = 'Hackathon', 
     teamSize = 3, 
     leaderName = '', 
+    yearOfStudy = '',
     onReset = () => {} 
   } = $props();
 </script>
@@ -31,6 +32,12 @@
       <div class="summary-row">
         <span class="summary-label">Team Leader:</span>
         <span class="summary-value">{leaderName}</span>
+      </div>
+    {/if}
+    {#if yearOfStudy}
+      <div class="summary-row">
+        <span class="summary-label">Year of Study:</span>
+        <span class="summary-value">{yearOfStudy}</span>
       </div>
     {/if}
     <div class="summary-row">

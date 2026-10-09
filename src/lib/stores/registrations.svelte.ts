@@ -37,7 +37,8 @@ function fromDoc(id: string, event: EventId, d: DocumentData): Registration {
 		teamLeader: {
 			name: str(d.teamLeader?.name),
 			admissionNumber: str(d.teamLeader?.admissionNumber),
-			classSection: str(d.teamLeader?.classSection),
+			// main's form stores the year of study in both fields; older entries may only have one.
+			classSection: str(d.teamLeader?.classSection || d.teamLeader?.yearOfStudy),
 			email: str(d.teamLeader?.email)
 		},
 		members,
