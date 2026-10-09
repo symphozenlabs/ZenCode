@@ -22,6 +22,32 @@ service cloud.firestore {
       );
     }
 
+    // Team name and leader mobile are optional so older clients keep working,
+    // but when sent they must be sensible.
+    function validTeamExtras(data) {
+      return (!('teamName' in data)
+          || (data.teamName is string && data.teamName.size() >= 2 && data.teamName.size() <= 50))
+        // Phone numbers belong in registration_contacts, never in the public doc.
+        && !('mobileNumber' in data.teamLeader);
+    }
+
+    // A contact doc may only be created in the same write as the registration
+    // it belongs to (it exists after the batch but not before).
+    function isNewRegistration(collectionName, teamId) {
+      return existsAfter(/databases/$(database)/documents/$(collectionName)/$(teamId))
+        && !exists(/databases/$(database)/documents/$(collectionName)/$(teamId));
+    }
+
+    function isValidContact(data, teamId) {
+      return data.keys().hasOnly(['event', 'mobileNumber', 'createdAt'])
+        && data.mobileNumber is string && data.mobileNumber.matches('[6-9][0-9]{9}')
+        && data.createdAt == request.time
+        && (
+          (data.event == 'Hackathon' && isNewRegistration('hackathon_registered_participants', teamId))
+          || (data.event == 'Pitch Fest' && isNewRegistration('pitchfest_registered_participants', teamId))
+        );
+    }
+
     // Helper function to validate Hackathon registration payload
     function isValidHackathon(data) {
       return data.event == 'Hackathon'
@@ -34,6 +60,8 @@ service cloud.firestore {
           (data.teamLeader.classSection is string && data.teamLeader.classSection.size() > 0)
         )
         && data.teamLeader.email is string && data.teamLeader.email.size() > 0
+        && validTeamExtras(data)
+        && data.teamLeader.admissionNumber.upper().matches('2[56]CAPMCA[0-9]{3}')
         && data.members is list
         && data.members.size() == data.teamSize
         && data.registeredAt == request.time;
@@ -42,7 +70,7 @@ service cloud.firestore {
     // Helper function to validate Pitch Fest registration payload
     function isValidPitchFest(data) {
       return data.event == 'Pitch Fest'
-        && data.teamSize == 2
+        && (data.teamSize == 1 || data.teamSize == 2)
         && data.teamLeader is map
         && data.teamLeader.name is string && data.teamLeader.name.size() > 0
         && data.teamLeader.admissionNumber is string && data.teamLeader.admissionNumber.size() > 0
@@ -51,8 +79,10 @@ service cloud.firestore {
           (data.teamLeader.classSection is string && data.teamLeader.classSection.size() > 0)
         )
         && data.teamLeader.email is string && data.teamLeader.email.size() > 0
+        && validTeamExtras(data)
+        && data.teamLeader.admissionNumber.upper().matches('2[56]CAPMCA[0-9]{3}')
         && data.members is list
-        && data.members.size() == 2
+        && data.members.size() == data.teamSize
         && data.registeredAt == request.time;
     }
 
@@ -76,6 +106,11 @@ service cloud.firestore {
       allow create: if isValidPitchFest(request.resource.data);
       allow update: if isAdmin() && isValidAdminUpdate();
       allow delete: if isAdmin();
+    }
+
+    match /registration_contacts/{teamId} {
+      allow create: if isAdmin() || isValidContact(request.resource.data, teamId);
+      allow read, update, delete: if isAdmin();
     }
 
     match /admins/{uid} {

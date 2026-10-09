@@ -27,9 +27,13 @@
   "dependencies": {
     "@lucide/svelte": "^1.53.0",
     "firebase": "^13.0.0",
-    "firebase-admin": "^13.10.0",
+    "firebase-admin": "^14.5.0",
     "qrcode": "^1.5.4",
     "qrcode-generator": "^2.0.4",
     "resend": "^6.32.1"
+  },
+  "overrides": {
+    "@grpc/grpc-js": "^1.14.5",
+    "cookie": "^0.7.2"
   }
 }

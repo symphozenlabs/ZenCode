@@ -4,6 +4,7 @@
 	import { registrations } from '$lib/stores/registrations.svelte';
 	import { siteConfig } from '$lib/stores/site-config.svelte';
 	import { formatTimestamp } from '$lib/utils/format';
+	import { teamLabel } from '$lib/registrations/model';
 	import PageHeader from '$lib/components/admin/PageHeader.svelte';
 	import StatCard from '$lib/components/admin/StatCard.svelte';
 	import StatusBadge from '$lib/components/ui/StatusBadge.svelte';
@@ -77,7 +78,7 @@
 					{#each recent as r (r.id)}
 						<li class="grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-0.5 px-4 py-3 text-sm sm:grid-cols-[1fr_8rem_6rem_auto]">
 							<span class="min-w-0">
-								<span class="block truncate font-medium">{r.teamLeader.name || '—'}</span>
+								<span class="block truncate font-medium">{teamLabel(r)}</span>
 								<span class="block truncate text-xs text-muted-foreground">{r.teamLeader.classSection} · {r.teamSize} members</span>
 							</span>
 							<span class="hidden text-muted-foreground sm:block">{EVENT_LABELS[r.event]}</span>

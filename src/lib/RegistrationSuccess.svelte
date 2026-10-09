@@ -1,6 +1,7 @@
 <script>
   let { 
     eventTitle = 'Hackathon', 
+    teamName = '',
     teamSize = 3, 
     leaderName = '', 
     yearOfStudy = '',
@@ -28,6 +29,12 @@
       <span class="summary-label">Event:</span>
       <span class="summary-value">{eventTitle}</span>
     </div>
+    {#if teamName}
+      <div class="summary-row">
+        <span class="summary-label">Team Name:</span>
+        <span class="summary-value">{teamName}</span>
+      </div>
+    {/if}
     {#if leaderName}
       <div class="summary-row">
         <span class="summary-label">Team Leader:</span>
@@ -42,7 +49,7 @@
     {/if}
     <div class="summary-row">
       <span class="summary-label">Team Size:</span>
-      <span class="summary-value green-badge">{teamSize} Members</span>
+      <span class="summary-value green-badge">{teamSize} {teamSize === 1 ? 'Member' : 'Members'}</span>
     </div>
     <div class="summary-row">
       <span class="summary-label">Status:</span>

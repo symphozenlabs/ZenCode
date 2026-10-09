@@ -163,6 +163,7 @@ function getSanitizedSender(rawSender) {
  * @param {Object} params
  * @param {string} params.teamId - Document ID / Unique Team Registration ID
  * @param {string} params.event - "Hackathon" or "Pitch Fest"
+ * @param {string} [params.teamName] - Team name chosen at registration
  * @param {Object} params.teamLeader - Leader details { name, admissionNumber, yearOfStudy, email }
  * @param {Array<Object>} params.members - List of all team members
  * @param {string} [params.baseUrl] - Domain/host origin URL for check-in route
@@ -171,6 +172,7 @@ function getSanitizedSender(rawSender) {
 export async function sendTeamConfirmationEmails({
   teamId,
   event,
+  teamName: providedTeamName = '',
   teamLeader,
   members = [],
   baseUrl = 'https://zencode.symphozen.com'
@@ -224,7 +226,7 @@ export async function sendTeamConfirmationEmails({
   // Derive Event & Team Name
   const eventName = event || 'Hackathon';
   const leaderName = teamLeader?.name?.trim() || 'Team';
-  const teamName = `${leaderName}'s ${eventName} Team`;
+  const teamName = providedTeamName.trim() || `${leaderName}'s ${eventName} Team`;
 
   // Deduplicate and validate all recipient members
   const allRecipientsMap = new Map();

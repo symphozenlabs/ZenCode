@@ -14,9 +14,17 @@
     activeEvent === 'hackathon' ? hackathonHeight : pitchfestHeight
   );
 
+  // Animate the viewport height only while switching tabs; inside a pane the
+  // member cards animate themselves, and a lagging height would clip them.
+  let switching = $state(false);
+  let switchTimer;
+
   function selectEvent(event) {
     if (activeEvent === event) return;
     activeEvent = event;
+    switching = true;
+    clearTimeout(switchTimer);
+    switchTimer = setTimeout(() => (switching = false), 500);
   }
 </script>
 
@@ -81,6 +89,7 @@
       <!-- HORIZONTALLY SLIDING VIEWPORT -->
       <div 
         class="slider-viewport"
+        class:switching
         style="height: {currentHeight > 0 ? `${currentHeight}px` : 'auto'};"
       >
         <div 
@@ -94,6 +103,7 @@
             aria-labelledby="tab-hackathon"
             class="slider-pane"
             bind:clientHeight={hackathonHeight}
+            class:dimmed={activeEvent !== 'hackathon'}
             inert={activeEvent !== 'hackathon' ? true : undefined}
           >
             <HackathonRegistration />
@@ -106,6 +116,7 @@
             aria-labelledby="tab-pitchfest"
             class="slider-pane"
             bind:clientHeight={pitchfestHeight}
+            class:dimmed={activeEvent !== 'pitchfest'}
             inert={activeEvent !== 'pitchfest' ? true : undefined}
           >
             <PitchFestRegistration />
@@ -294,6 +305,9 @@
     width: 100%;
     overflow: hidden;
     position: relative;
+  }
+
+  .slider-viewport.switching {
     transition: height 450ms cubic-bezier(0.22, 1, 0.36, 1);
   }
 
@@ -306,10 +320,15 @@
   }
 
   .slider-pane {
+    transition: opacity 350ms ease;
     width: 50%;
     min-width: 50%;
     box-sizing: border-box;
     padding: 24px 28px;
+  }
+
+  .slider-pane.dimmed {
+    opacity: 0;
   }
 
   /* Footer */
@@ -373,6 +392,7 @@
   @media (prefers-reduced-motion: reduce) {
     .slider-track,
     .slider-viewport,
+    .slider-pane,
     .switcher-indicator {
       transition: none !important;
     }

@@ -18,7 +18,7 @@
 		SearchX
 	} from '@lucide/svelte';
 	import { EVENT_LABELS, type EventId } from '$lib/config/site';
-	import { referenceId, type Registration, type RegistrationStatus } from '$lib/registrations/model';
+	import { referenceId, teamLabel, type Registration, type RegistrationStatus } from '$lib/registrations/model';
 	import { registrations } from '$lib/stores/registrations.svelte';
 	import { formatTimestamp } from '$lib/utils/format';
 	import { downloadCsv, toCsv } from '$lib/utils/csv';
@@ -72,7 +72,9 @@
 			return [
 				r.id,
 				referenceId(r.id),
+				r.teamName,
 				r.teamLeader.name,
+				r.teamLeader.mobileNumber,
 				r.teamLeader.email,
 				r.teamLeader.admissionNumber,
 				r.teamLeader.classSection,
@@ -85,7 +87,7 @@
 		const dir = sortDir === 'asc' ? 1 : -1;
 		const val = (r: Registration): string | number =>
 			sortKey === 'name'
-				? r.teamLeader.name.toLowerCase()
+				? teamLabel(r).toLowerCase()
 				: sortKey === 'event'
 					? r.event
 					: sortKey === 'status'
@@ -128,7 +130,34 @@
 		}, 3200);
 	}
 
+	/**
+	 * Members of a rejected team may register again in a new team, so restoring
+	 * the old one could put the same person in two active teams. Find the first clash.
+	 */
+	function restoreConflict(r: Registration) {
+		const adm = new Set(r.members.map((m) => m.admissionNumber.trim().toUpperCase()).filter(Boolean));
+		const mail = new Set(r.members.map((m) => m.email.trim().toLowerCase()).filter(Boolean));
+		for (const other of registrations.items) {
+			if (other.id === r.id || other.event !== r.event || other.status === 'rejected') continue;
+			const m = other.members.find(
+				(x) => adm.has(x.admissionNumber.trim().toUpperCase()) || mail.has(x.email.trim().toLowerCase())
+			);
+			if (m) return { member: m, team: other };
+		}
+		return null;
+	}
+
 	async function setStatus(r: Registration, status: RegistrationStatus) {
+		if (status === 'approved') {
+			const clash = restoreConflict(r);
+			if (clash) {
+				notify(
+					`Can't restore: ${clash.member.name || clash.member.admissionNumber} has since registered with ${teamLabel(clash.team)}.`,
+					'error'
+				);
+				return;
+			}
+		}
 		busy = { ...busy, [r.id]: status };
 		try {
 			await registrations.setStatus(r, status);
@@ -158,12 +187,12 @@
 
 	function exportCsv() {
 		const headers = [
-			'Reference', 'Document ID', 'Status', 'Event', 'Leader name', 'Leader admission no.', 'Class & section',
-			'Leader email', 'Team size', 'Members', 'Registered at'
+			'Reference', 'Document ID', 'Status', 'Event', 'Team name', 'Leader name', 'Leader admission no.', 'Class & section',
+			'Leader email', 'Leader mobile', 'Team size', 'Members', 'Registered at'
 		];
 		const data = filtered.map((r) => [
-			referenceId(r.id), r.id, r.status, EVENT_LABELS[r.event], r.teamLeader.name, r.teamLeader.admissionNumber,
-			r.teamLeader.classSection, r.teamLeader.email, r.teamSize,
+			referenceId(r.id), r.id, r.status, EVENT_LABELS[r.event], r.teamName, r.teamLeader.name, r.teamLeader.admissionNumber,
+			r.teamLeader.classSection, r.teamLeader.email, r.teamLeader.mobileNumber, r.teamSize,
 			r.members.map((m) => `${m.name} (${m.admissionNumber}) <${m.email}>`).join('; '),
 			r.createdAt ? new Date(r.createdAt).toISOString() : ''
 		]);
@@ -308,8 +337,9 @@
 							</td>
 							<td class="px-3 py-2.5">
 								<button type="button" class="text-left" onclick={() => (expanded = open ? null : r.id)}>
-									<span class="block font-medium text-foreground">{r.teamLeader.name || '—'}</span>
-									<span class="block font-mono text-[11px] text-muted-foreground">{referenceId(r.id)} · {r.teamSize} members</span>
+									<span class="block font-medium text-foreground">{teamLabel(r)}</span>
+									<span class="block text-xs text-muted-foreground">{r.teamLeader.name || '—'}</span>
+									<span class="block font-mono text-[11px] text-muted-foreground">{referenceId(r.id)} · {r.teamSize} {r.teamSize === 1 ? 'member' : 'members'}</span>
 								</button>
 							</td>
 							{#if !event}<td class="hidden px-3 py-2.5 text-foreground md:table-cell">{EVENT_LABELS[r.event]}</td>{/if}
@@ -337,8 +367,8 @@
 										<div class="border-t border-dashed border-border px-4 py-5 md:pl-14">
 											<p class="text-xs font-semibold tracking-[0.1em] text-foreground uppercase">Participant details</p>
 											<div class="mt-4 grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
-												{@render detailGroup('Team leader', [['Name', r.teamLeader.name], ['Admission no.', r.teamLeader.admissionNumber], ['Class & section', r.teamLeader.classSection], ['Email', r.teamLeader.email]])}
-												{@render detailGroup('Event', [['Event', EVENT_LABELS[r.event]], ['Team size', `${r.teamSize} members`]])}
+												{@render detailGroup('Team leader', [['Name', r.teamLeader.name], ['Admission no.', r.teamLeader.admissionNumber], ['Class & section', r.teamLeader.classSection], ['Email', r.teamLeader.email], ['Mobile', r.teamLeader.mobileNumber]])}
+												{@render detailGroup('Event', [['Team name', r.teamName], ['Event', EVENT_LABELS[r.event]], ['Team size', `${r.teamSize} ${r.teamSize === 1 ? 'member' : 'members'}`]])}
 												{@render detailGroup('Registration', [['Reference', referenceId(r.id)], ['Document ID', r.id], ['Registered', formatTimestamp(r.createdAt, true)], ['Status', r.status[0].toUpperCase() + r.status.slice(1)], ['Reviewed by', r.reviewedBy ?? '']])}
 											</div>
 											<div class="mt-6">

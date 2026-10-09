@@ -1,9 +1,11 @@
-import { collection, deleteDoc, doc, onSnapshot, updateDoc, type DocumentData, type Unsubscribe } from 'firebase/firestore';
+import { collection, deleteDoc, doc, onSnapshot, updateDoc, writeBatch, type DocumentData, type Unsubscribe } from 'firebase/firestore';
 import { db } from '$lib/firebase/client';
 import { adminAuth } from './admin-auth.svelte';
 import { EVENT_IDS, type EventId } from '$lib/config/site';
 import {
 	COLLECTION_BY_EVENT,
+	COLLECTIONS,
+	EVENT_NAME,
 	searchFields,
 	type Registration,
 	type RegistrationStatus,
@@ -33,13 +35,15 @@ function fromDoc(id: string, event: EventId, d: DocumentData): Registration {
 	return {
 		id,
 		event,
+		teamName: str(d.teamName),
 		teamSize: typeof d.teamSize === 'number' ? d.teamSize : members.length,
 		teamLeader: {
 			name: str(d.teamLeader?.name),
 			admissionNumber: str(d.teamLeader?.admissionNumber),
 			// main's form stores the year of study in both fields; older entries may only have one.
 			classSection: str(d.teamLeader?.classSection || d.teamLeader?.yearOfStudy),
-			email: str(d.teamLeader?.email)
+			email: str(d.teamLeader?.email),
+			mobileNumber: str(d.teamLeader?.mobileNumber)
 		},
 		members,
 		status,
@@ -56,11 +60,15 @@ class RegistrationsStore {
 	#byEvent = $state<Record<EventId, Registration[]>>({ hackathon: [], 'pitch-fest': [] });
 	#ready = $state<Record<EventId, boolean>>({ hackathon: false, 'pitch-fest': false });
 	#error = $state(false);
+	/** Leader mobile numbers from the admin-only contacts collection, by registration ID */
+	#mobiles = $state<Record<string, string>>({});
 	#unsubs: Unsubscribe[] = [];
 	#refs = 0;
 
 	items = $derived(
-		[...this.#byEvent.hackathon, ...this.#byEvent['pitch-fest']].sort((a, b) => b.createdAt - a.createdAt)
+		[...this.#byEvent.hackathon, ...this.#byEvent['pitch-fest']]
+			.map((r) => (this.#mobiles[r.id] ? { ...r, teamLeader: { ...r.teamLeader, mobileNumber: this.#mobiles[r.id] } } : r))
+			.sort((a, b) => b.createdAt - a.createdAt)
 	);
 	status = $derived<'loading' | 'ready' | 'error'>(
 		this.#error ? 'error' : EVENT_IDS.every((id) => this.#ready[id]) ? 'ready' : 'loading'
@@ -97,6 +105,16 @@ class RegistrationsStore {
 				)
 			);
 		}
+		this.#unsubs.push(
+			onSnapshot(
+				collection(db(), COLLECTIONS.CONTACTS),
+				(snap) => {
+					this.#mobiles = Object.fromEntries(snap.docs.map((d) => [d.id, str(d.data().mobileNumber)]));
+				},
+				// Registrations still work without contacts (e.g. rules not deployed yet).
+				(err) => console.error('[registrations:contacts]', err)
+			)
+		);
 	}
 
 	#stop() {
@@ -117,18 +135,31 @@ class RegistrationsStore {
 		});
 	}
 
-	update(r: Registration, data: { teamLeader: TeamLeader; members: TeamMember[] }) {
+	update(r: Registration, data: { teamName: string; teamLeader: TeamLeader; members: TeamMember[] }) {
 		const members = data.members.map((m, i) => ({ ...m, memberNumber: i + 1 }));
-		return updateDoc(this.#ref(r), {
-			teamLeader: data.teamLeader,
+		// The mobile number is private, so it's kept out of the public registration doc.
+		const { mobileNumber, ...teamLeader } = data.teamLeader;
+		const batch = writeBatch(db());
+		batch.update(this.#ref(r), {
+			teamName: data.teamName,
+			teamLeader,
 			members,
 			teamSize: members.length,
 			...searchFields(members)
 		});
+		if (mobileNumber !== r.teamLeader.mobileNumber) {
+			batch.set(this.#contactRef(r), { event: EVENT_NAME[r.event], mobileNumber }, { merge: true });
+		}
+		return batch.commit();
 	}
 
-	remove(r: Registration) {
-		return deleteDoc(this.#ref(r));
+	async remove(r: Registration) {
+		await deleteDoc(this.#ref(r));
+		await deleteDoc(this.#contactRef(r)).catch(() => {});
+	}
+
+	#contactRef(r: Pick<Registration, 'id'>) {
+		return doc(db(), COLLECTIONS.CONTACTS, r.id);
 	}
 }
 
