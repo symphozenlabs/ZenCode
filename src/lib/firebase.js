@@ -141,7 +141,7 @@ export async function registerHackathonTeam(registrationData) {
     qrGenerated: true,
     qrVersion: 1,
     confirmationEmailStatus: "pending",
-    teamName: (teamName || '').trim(),
+    ...((teamName || '').trim() ? { teamName: teamName.trim() } : {}),
     teamLeader: {
       name: teamLeader.name.trim(),
       admissionNumber: teamLeader.admissionNumber.trim(),
@@ -180,7 +180,7 @@ export async function registerPitchFestTeam(registrationData) {
     qrGenerated: true,
     qrVersion: 1,
     confirmationEmailStatus: "pending",
-    teamName: (teamName || '').trim(),
+    ...((teamName || '').trim() ? { teamName: teamName.trim() } : {}),
     teamLeader: {
       name: teamLeader.name.trim(),
       admissionNumber: teamLeader.admissionNumber.trim(),

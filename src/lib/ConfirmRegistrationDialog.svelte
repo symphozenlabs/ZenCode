@@ -80,10 +80,12 @@
 
       <div class="dialog-body">
         <dl class="team-summary">
-          <div class="summary-item wide">
-            <dt>Team name</dt>
-            <dd class="team-name">{shown.teamName}</dd>
-          </div>
+          {#if shown.teamName}
+            <div class="summary-item wide">
+              <dt>Team name</dt>
+              <dd class="team-name">{shown.teamName}</dd>
+            </div>
+          {/if}
           <div class="summary-item">
             <dt>Event</dt>
             <dd>{eventName}</dd>
@@ -138,6 +140,11 @@
 
 <style>
   .confirm-dialog {
+    /* Tailwind's reset zeroes the margin the browser uses to centre dialogs. */
+    position: fixed;
+    inset: 0;
+    margin: auto;
+    height: fit-content;
     width: min(560px, calc(100vw - 24px));
     max-height: calc(100dvh - 32px);
     padding: 0;

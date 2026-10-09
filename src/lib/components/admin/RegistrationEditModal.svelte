@@ -54,7 +54,7 @@
 		if (!EMAIL.test(leader.email.trim())) e['leader.email'] = 'Enter a valid email.';
 		// Older registrations have no team name or mobile; only validate what's filled in.
 		const tn = teamName.trim();
-		if (tn && (tn.length < 2 || tn.length > 50)) e.teamName = 'Use 2–50 characters.';
+		if (tn && (tn.length < 2 || tn.length > 35)) e.teamName = 'Use 2–35 characters.';
 		const mobile = leader.mobileNumber.replace(/[\s-]/g, '');
 		if (mobile && !MOBILE.test(mobile)) e['leader.mobileNumber'] = 'Enter a 10-digit mobile number.';
 		const adm = new Set([leader.admissionNumber.trim().toUpperCase()]);
@@ -107,7 +107,9 @@
 
 <Modal open={!!registration} title="Edit registration" description={registration ? `Team of ${registration.teamLeader.name}` : ''} size="lg" {onclose}>
 	<form id="edit-registration" class="space-y-8" onsubmit={(e) => { e.preventDefault(); save(); }} novalidate>
-		<Field label="Team name" bind:value={teamName} error={errors.teamName} />
+		{#if registration?.event === 'hackathon'}
+			<Field label="Team name" bind:value={teamName} error={errors.teamName} />
+		{/if}
 
 		<fieldset class="grid gap-4 sm:grid-cols-2">
 			<legend class="mb-3 text-xs font-semibold tracking-[0.08em] text-muted-foreground uppercase">Team leader</legend>

@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { db, COLLECTIONS } from './firebase.js';
   import { doc, getDoc } from 'firebase/firestore';
+  import logo from '../assets/logo.png';
 
   let { teamId = '' } = $props();
 
@@ -128,14 +129,7 @@
     <div class="nav-container">
       <div class="brand-group">
         <div class="brand-logo-mark">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="brand-svg">
-            <polyline points="16 18 22 12 16 6"></polyline>
-            <polyline points="8 6 2 12 8 18"></polyline>
-          </svg>
-        </div>
-        <div class="brand-text">
-          <span class="brand-title">ZEN CODE</span>
-          <span class="brand-year">2026</span>
+          <img src={logo} alt="ZEN CODE Hackathon" class="brand-img" />
         </div>
       </div>
       <div class="desk-tag">
@@ -310,33 +304,19 @@
   }
 
   .brand-logo-mark {
-    width: 34px;
-    height: 34px;
-    background: linear-gradient(135deg, #06b6d4, #0284c7);
-    border-radius: 8px;
+    height: 40px;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: white;
   }
 
-  .brand-svg {
-    width: 20px;
-    height: 20px;
+  .brand-img {
+    height: 100%;
+    width: auto;
+    display: block;
   }
 
-  .brand-title {
-    font-weight: 800;
-    font-size: 1.1rem;
-    letter-spacing: 0.5px;
-  }
 
-  .brand-year {
-    color: #06b6d4;
-    font-weight: 700;
-    font-size: 0.9rem;
-    margin-left: 4px;
-  }
 
   .desk-tag {
     display: flex;
