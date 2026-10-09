@@ -19,18 +19,21 @@ if (existsSync('.env')) {
 }
 const env = process.env;
 const BASE = env.BASE_URL ?? 'http://localhost:5173';
-const ADMIN_EMAIL = 'admin@gmail.com';
-const ADMIN_PASSWORD = 'admin@123';
+const { ADMIN_EMAIL, ADMIN_PASSWORD } = env;
+if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
+	console.error('Set ADMIN_EMAIL and ADMIN_PASSWORD in .env first.');
+	process.exit(1);
+}
 const COLLECTIONS = {
 	hackathon: 'hackathon_registered_participants',
 	'pitch-fest': 'pitchfest_registered_participants'
 };
 
 const app = initializeApp({
-	apiKey: env.PUBLIC_FIREBASE_API_KEY,
-	authDomain: env.PUBLIC_FIREBASE_AUTH_DOMAIN,
-	projectId: env.PUBLIC_FIREBASE_PROJECT_ID,
-	appId: env.PUBLIC_FIREBASE_APP_ID
+	apiKey: env.VITE_FIREBASE_API_KEY,
+	authDomain: env.VITE_FIREBASE_AUTH_DOMAIN,
+	projectId: env.VITE_FIREBASE_PROJECT_ID,
+	appId: env.VITE_FIREBASE_APP_ID
 });
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -71,14 +74,14 @@ function payload(event, size) {
 			email: members[0].email
 		},
 		members,
-		status: 'pending',
+		status: 'approved',
 		registeredAt: serverTimestamp(),
 		_searchAdmissionNumbers: members.map((m) => m.admissionNumber.toUpperCase()),
 		_searchEmails: members.map((m) => m.email.toLowerCase())
 	};
 }
 
-console.log(`\nZenCode database check — project ${env.PUBLIC_FIREBASE_PROJECT_ID}\n`);
+console.log(`\nZenCode database check — project ${env.VITE_FIREBASE_PROJECT_ID}\n`);
 
 // ---- Public (signed out), exactly like the registration form ----
 await step('Public Hackathon registration', async () => {
@@ -111,18 +114,18 @@ await step('Admin reads both collections', async () => {
 		total += snap.size;
 		const d = snap.docs.find((x) => x.id === id)?.data();
 		if (!d) throw new Error(`${id} missing from ${col}`);
-		if (!d.registeredAt?.toMillis || d.status !== 'pending' || d.members.length !== d.teamSize) {
+		if (!d.registeredAt?.toMillis || d.status !== 'approved' || d.members.length !== d.teamSize) {
 			throw new Error(`${id}: stored fields do not match`);
 		}
 	}
 	ok(`Admin listener query returns ${total} team(s); new entries have timestamp, status and members`);
 });
 
-await step('Admin approves a team', async () => {
+await step('Admin rejects a team', async () => {
 	const [col, id] = created[0];
-	await updateDoc(doc(db, col, id), { status: 'approved', reviewedBy: ADMIN_EMAIL, reviewedAt: Date.now() });
-	if ((await getDoc(doc(db, col, id))).data().status !== 'approved') throw new Error('status did not change');
-	ok('Status update persisted (pending → approved)');
+	await updateDoc(doc(db, col, id), { status: 'rejected', reviewedBy: ADMIN_EMAIL, reviewedAt: Date.now() });
+	if ((await getDoc(doc(db, col, id))).data().status !== 'rejected') throw new Error('status did not change');
+	ok('Status update persisted (approved → rejected)');
 });
 
 await step('Admin edits a team', async () => {

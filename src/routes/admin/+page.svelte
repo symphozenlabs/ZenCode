@@ -1,9 +1,10 @@
 <script lang="ts">
-	import { Users, Code2, Presentation, Clock, BadgeCheck, CloudOff, RotateCcw, Inbox } from '@lucide/svelte';
+	import { Users, Code2, Presentation, Ban, BadgeCheck, CloudOff, RotateCcw, Inbox } from '@lucide/svelte';
 	import { EVENT_IDS, EVENT_LABELS } from '$lib/config/site';
 	import { registrations } from '$lib/stores/registrations.svelte';
 	import { siteConfig } from '$lib/stores/site-config.svelte';
 	import { formatTimestamp } from '$lib/utils/format';
+	import { teamLabel } from '$lib/registrations/model';
 	import PageHeader from '$lib/components/admin/PageHeader.svelte';
 	import StatCard from '$lib/components/admin/StatCard.svelte';
 	import StatusBadge from '$lib/components/ui/StatusBadge.svelte';
@@ -23,16 +24,15 @@
 					id,
 					{
 						total: list.length,
-						pending: list.filter((r) => r.status === 'pending').length,
 						approved: list.filter((r) => r.status === 'approved').length,
 						rejected: list.filter((r) => r.status === 'rejected').length,
 						people: list.filter((r) => r.status !== 'rejected').reduce((n, r) => n + r.teamSize, 0)
 					}
 				];
 			})
-		) as Record<(typeof EVENT_IDS)[number], { total: number; pending: number; approved: number; rejected: number; people: number }>
+		) as Record<(typeof EVENT_IDS)[number], { total: number; approved: number; rejected: number; people: number }>
 	);
-	const pending = $derived(items.filter((r) => r.status === 'pending').length);
+	const rejected = $derived(items.filter((r) => r.status === 'rejected').length);
 	const approved = $derived(items.filter((r) => r.status === 'approved').length);
 	const last24h = $derived(items.filter((r) => Date.now() - r.createdAt < 86_400_000).length);
 	const recent = $derived(items.slice(0, 8));
@@ -55,8 +55,8 @@
 		<StatCard label="Total registrations" value={items.length} helper="{last24h} in the last 24 hours" icon={Users} {loading} />
 		<StatCard label="Hackathon" value={byEvent.hackathon.total} helper="{byEvent.hackathon.people} people" icon={Code2} {loading} href="/admin/hackathon" />
 		<StatCard label="Pitch Fest" value={byEvent['pitch-fest'].total} helper="{byEvent['pitch-fest'].people} people" icon={Presentation} {loading} href="/admin/pitch-fest" />
-		<StatCard label="Pending review" value={pending} helper="Waiting for a decision" icon={Clock} {loading} />
-		<StatCard label="Approved" value={approved} helper="Confirmed entries" icon={BadgeCheck} {loading} />
+		<StatCard label="Active teams" value={approved} helper="Auto-approved on registration" icon={BadgeCheck} {loading} />
+		<StatCard label="Rejected" value={rejected} helper="Removed by an organiser" icon={Ban} {loading} />
 	</div>
 
 	<div class="mt-6 grid gap-6 xl:grid-cols-[1.6fr_1fr]">
@@ -78,7 +78,7 @@
 					{#each recent as r (r.id)}
 						<li class="grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-0.5 px-4 py-3 text-sm sm:grid-cols-[1fr_8rem_6rem_auto]">
 							<span class="min-w-0">
-								<span class="block truncate font-medium">{r.teamLeader.name || '—'}</span>
+								<span class="block truncate font-medium">{teamLabel(r)}</span>
 								<span class="block truncate text-xs text-muted-foreground">{r.teamLeader.classSection} · {r.teamSize} members</span>
 							</span>
 							<span class="hidden text-muted-foreground sm:block">{EVENT_LABELS[r.event]}</span>
@@ -108,7 +108,7 @@
 							</span>
 						</div>
 						<dl class="mt-3 grid grid-cols-3 gap-2 text-center">
-							{#each [['Pending', s.pending], ['Approved', s.approved], ['Rejected', s.rejected]] as [k, v] (k)}
+							{#each [['Teams', s.total], ['Active', s.approved], ['Rejected', s.rejected]] as [k, v] (k)}
 								<div class="rounded-md bg-muted px-2 py-2">
 									<dt class="text-[11px] text-muted-foreground">{k}</dt>
 									<dd class="text-lg font-semibold tabular">{loading ? '–' : v}</dd>

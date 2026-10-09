@@ -5,6 +5,7 @@
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Field from '$lib/components/ui/Field.svelte';
+	import { ADMISSION_HINT, isValidAdmission, normalizeAdmission } from '$lib/admission.js';
 
 	interface Props {
 		registration: Registration | null;
@@ -14,7 +15,8 @@
 	let { registration, onclose, onsaved }: Props = $props();
 
 	type MemberDraft = Omit<TeamMember, 'memberNumber'>;
-	let leader = $state<TeamLeader>({ name: '', admissionNumber: '', classSection: '', email: '' });
+	let teamName = $state('');
+	let leader = $state<TeamLeader>({ name: '', admissionNumber: '', classSection: '', email: '', mobileNumber: '' });
 	/** Members 2..n (member 1 is always the leader) */
 	let others = $state<MemberDraft[]>([]);
 	let errors = $state<Record<string, string>>({});
@@ -23,6 +25,7 @@
 
 	$effect(() => {
 		if (!registration) return;
+		teamName = registration.teamName;
 		leader = { ...registration.teamLeader };
 		others = registration.members.slice(1).map(({ name, admissionNumber, email }) => ({ name, admissionNumber, email }));
 		errors = {};
@@ -34,19 +37,33 @@
 	const minOthers = $derived(Math.min(...sizes) - 1);
 
 	const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+	const MOBILE = /^[6-9]\d{9}$/;
+
+	/** Older registrations may predate the format rule; only block new or changed values. */
+	function badAdmission(value: string) {
+		const existing = new Set(registration?.members.map((m) => normalizeAdmission(m.admissionNumber)) ?? []);
+		return !isValidAdmission(value) && !existing.has(normalizeAdmission(value));
+	}
 
 	function validate() {
 		const e: Record<string, string> = {};
 		if (!leader.name.trim()) e['leader.name'] = 'Required.';
 		if (!leader.admissionNumber.trim()) e['leader.admissionNumber'] = 'Required.';
+		else if (badAdmission(leader.admissionNumber)) e['leader.admissionNumber'] = ADMISSION_HINT;
 		if (!leader.classSection.trim()) e['leader.classSection'] = 'Required.';
 		if (!EMAIL.test(leader.email.trim())) e['leader.email'] = 'Enter a valid email.';
+		// Older registrations have no team name or mobile; only validate what's filled in.
+		const tn = teamName.trim();
+		if (tn && (tn.length < 2 || tn.length > 35)) e.teamName = 'Use 2–35 characters.';
+		const mobile = leader.mobileNumber.replace(/[\s-]/g, '');
+		if (mobile && !MOBILE.test(mobile)) e['leader.mobileNumber'] = 'Enter a 10-digit mobile number.';
 		const adm = new Set([leader.admissionNumber.trim().toUpperCase()]);
 		const mail = new Set([leader.email.trim().toLowerCase()]);
 		others.forEach((m, i) => {
 			if (!m.name.trim()) e[`m.${i}.name`] = 'Required.';
 			const a = m.admissionNumber.trim().toUpperCase();
 			if (!a) e[`m.${i}.admissionNumber`] = 'Required.';
+			else if (badAdmission(a)) e[`m.${i}.admissionNumber`] = ADMISSION_HINT;
 			else if (adm.has(a)) e[`m.${i}.admissionNumber`] = 'Duplicate in team.';
 			adm.add(a);
 			const em = m.email.trim().toLowerCase();
@@ -65,18 +82,20 @@
 		saveError = '';
 		const l = { ...$state.snapshot(leader) };
 		for (const k of Object.keys(l) as (keyof TeamLeader)[]) l[k] = l[k].trim();
+		l.mobileNumber = l.mobileNumber.replace(/[\s-]/g, '');
+		l.admissionNumber = normalizeAdmission(l.admissionNumber);
 		const members: TeamMember[] = [
 			{ memberNumber: 1, name: l.name, admissionNumber: l.admissionNumber, email: l.email },
 			...$state.snapshot(others).map((m, i) => ({
 				memberNumber: i + 2,
 				name: m.name.trim(),
-				admissionNumber: m.admissionNumber.trim(),
+				admissionNumber: normalizeAdmission(m.admissionNumber),
 				email: m.email.trim()
 			}))
 		];
 		try {
-			await registrations.update(registration, { teamLeader: l, members });
-			onsaved(`Saved changes to ${l.name}'s team`);
+			await registrations.update(registration, { teamName: teamName.trim(), teamLeader: l, members });
+			onsaved(`Saved changes to ${teamName.trim() || `${l.name}'s team`}`);
 			onclose();
 		} catch {
 			saveError = 'Unable to save changes. Check your connection and try again.';
@@ -88,12 +107,17 @@
 
 <Modal open={!!registration} title="Edit registration" description={registration ? `Team of ${registration.teamLeader.name}` : ''} size="lg" {onclose}>
 	<form id="edit-registration" class="space-y-8" onsubmit={(e) => { e.preventDefault(); save(); }} novalidate>
+		{#if registration?.event === 'hackathon'}
+			<Field label="Team name" bind:value={teamName} error={errors.teamName} />
+		{/if}
+
 		<fieldset class="grid gap-4 sm:grid-cols-2">
 			<legend class="mb-3 text-xs font-semibold tracking-[0.08em] text-muted-foreground uppercase">Team leader</legend>
 			<Field label="Name" bind:value={leader.name} error={errors['leader.name']} />
 			<Field label="Admission number" bind:value={leader.admissionNumber} error={errors['leader.admissionNumber']} />
 			<Field label="Class & section" bind:value={leader.classSection} error={errors['leader.classSection']} />
 			<Field label="Email" type="email" bind:value={leader.email} error={errors['leader.email']} />
+			<Field label="Mobile number" type="tel" bind:value={leader.mobileNumber} error={errors['leader.mobileNumber']} />
 		</fieldset>
 
 		<fieldset>

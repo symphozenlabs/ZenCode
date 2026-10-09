@@ -32,3 +32,6 @@ dist-ssr
 .svelte-kit
 build
 /package
+
+# Vercel build output
+.vercel

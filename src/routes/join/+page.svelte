@@ -1,78 +1,48 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { page } from '$app/state';
 	import { ArrowRight } from '@lucide/svelte';
-	import { JOIN_CODE_RE } from '$lib/live/session';
-	import { DUR, rise } from '$lib/live/motion';
+	import GameStage from '$lib/components/games/GameStage.svelte';
 	import Logo from '$lib/components/site/Logo.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 
-	let code = $state((page.url.searchParams.get('code') ?? '').replace(/\D/g, '').slice(0, 6));
-	let busy = $state(false);
+	/** Fallback for players who can't scan: type the code shown on screen. */
+	let code = $state('');
 	let error = $state('');
 
-	function oninput(e: Event) {
-		const el = e.currentTarget as HTMLInputElement;
-		code = el.value.replace(/\D/g, '').slice(0, 6);
-		el.value = code;
-		error = '';
-	}
-
-	async function submit(e: SubmitEvent) {
+	function submit(e: SubmitEvent) {
 		e.preventDefault();
-		if (!JOIN_CODE_RE.test(code)) {
-			error = 'Enter the 6-digit code on the big screen.';
+		const c = code.trim().toUpperCase().replace(/\s+/g, '');
+		if (!/^ZC[A-Z2-9]{4}$/.test(c)) {
+			error = 'Enter the 6-character code shown on the big screen.';
 			return;
 		}
-		busy = true;
-		error = '';
-		try {
-			const res = await fetch(`/api/live/join/${code}`);
-			if (res.ok) return goto(`/play/${code}`);
-			const data = await res.json().catch(() => null);
-			error = data?.message ?? 'That code doesn’t match a live session.';
-		} catch {
-			error = 'Network problem — check your connection.';
-		}
-		busy = false;
+		goto(`/join/${c}`);
 	}
 </script>
 
-<svelte:head><title>Join a live session — ZenCode</title></svelte:head>
+<svelte:head><title>Join a game — ZenCode</title></svelte:head>
 
-<div class="flex min-h-dvh flex-col bg-cream text-ink">
-	<header class="px-4 pt-5"><Logo tone="dark" /></header>
-
-	<form class="mx-auto flex w-full max-w-sm flex-1 flex-col px-4 pt-[12vh] pb-6" onsubmit={submit} novalidate>
-		<div in:rise={{ y: 14, duration: DUR.stage }}>
-			<p class="eyebrow text-forest-700">Live session</p>
-			<h1 class="mt-2 font-display text-3xl font-semibold tracking-tight text-forest-950">Enter the join code</h1>
-			<p class="mt-2 text-[15px] text-muted-foreground">It’s on the big screen.</p>
-		</div>
-
-		<div class="mt-8" in:rise={{ y: 14, duration: DUR.stage, delay: 80 }}>
-			<label for="code" class="sr-only">Join code</label>
+<GameStage>
+	<header class="px-4 py-4"><Logo /></header>
+	<main class="mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-4 pb-16">
+		<p class="eyebrow text-green-300">Live game</p>
+		<h1 class="mt-2 font-display text-4xl font-bold tracking-tight uppercase">Join a game</h1>
+		<form class="mt-8 space-y-3" onsubmit={submit} novalidate>
+			<label for="code" class="eyebrow block text-cream/60">Game code</label>
 			<input
 				id="code"
-				value={code}
-				{oninput}
-				inputmode="numeric"
+				bind:value={code}
+				placeholder="ZC7K42"
+				maxlength="8"
 				autocomplete="off"
-				pattern="[0-9]*"
-				maxlength="6"
-				placeholder="000000"
+				autocapitalize="characters"
+				spellcheck="false"
 				aria-invalid={error ? 'true' : undefined}
 				aria-describedby={error ? 'code-err' : undefined}
-				class="h-16 w-full rounded-lg border bg-card text-center font-display text-4xl font-semibold tracking-[0.3em] text-forest-950 tabular outline-none transition-[border-color,box-shadow] duration-150 placeholder:text-input focus:border-ring focus:ring-4 focus:ring-ring/20
-					{error ? 'border-destructive' : 'border-input'}"
+				class="h-16 w-full rounded-lg border-2 border-stage-line bg-stage-raised px-4 text-center font-mono text-3xl font-bold tracking-[0.3em] text-cream uppercase outline-none transition-colors duration-150 placeholder:text-cream/20 focus:border-green-300"
 			/>
-			<p id="code-err" class="mt-2 min-h-5 text-sm text-destructive" aria-live="polite">{error}</p>
-		</div>
-
-		<div class="mt-auto pt-6">
-			<Button type="submit" size="xl" class="w-full" loading={busy} disabled={code.length !== 6}>
-				Continue <ArrowRight class="size-4" />
-			</Button>
-		</div>
-	</form>
-</div>
+			{#if error}<p id="code-err" class="text-sm text-attention">{error}</p>{/if}
+			<Button type="submit" variant="sun" size="xl" class="w-full">Continue <ArrowRight class="size-4" /></Button>
+		</form>
+	</main>
+</GameStage>

@@ -25,7 +25,7 @@ export interface EventConfig {
 	registrationOpen: boolean;
 	/** ISO date or empty */
 	registrationDeadline: string;
-	/** Maximum active (pending + approved) registrations; null = unlimited */
+	/** Maximum active registrations; null = unlimited (not enforced by the forms) */
 	capacity: number | null;
 	teamMin: number;
 	teamMax: number;
