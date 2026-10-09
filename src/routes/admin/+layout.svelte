@@ -8,6 +8,8 @@
 	let { children } = $props();
 
 	const isLogin = $derived(page.url.pathname === '/admin/login');
+	// The live presenter is a full-bleed stage: same access check, no shell.
+	const isPresenter = $derived(/^\/admin\/live\/[^/]+\/present\/?$/.test(page.url.pathname));
 
 	adminAuth.start();
 
@@ -27,6 +29,8 @@
 </svelte:head>
 
 {#if isLogin}
+	{@render children()}
+{:else if adminAuth.status === 'admin' && isPresenter}
 	{@render children()}
 {:else if adminAuth.status === 'admin'}
 	<AdminShell>{@render children()}</AdminShell>

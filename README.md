@@ -9,7 +9,8 @@ Built with SvelteKit (Svelte 5), Tailwind CSS v4, Firebase Authentication (organ
 | Area | Routes | Access |
 | --- | --- | --- |
 | Public site | `/`, `/hackathon`, `/pitch-fest`, `/schedule`, `/rules`, `/register` | Anyone |
-| Admin | `/admin/login`, `/admin`, `/admin/hackathon`, `/admin/pitch-fest`, `/admin/settings` | Organisers (Firebase Auth + `admins/{uid}`) |
+| Admin | `/admin/login`, `/admin`, `/admin/hackathon`, `/admin/pitch-fest`, `/admin/settings`, `/admin/live` | Organisers (Firebase Auth + `admins/{uid}`) |
+| Live sessions (phones) | `/join`, `/play/{code}` | Anyone with the join code |
 
 Participants never create accounts — registering only records the team.
 
@@ -46,9 +47,21 @@ src/lib/components/motion/        AnimatedGrid, GlowBackground, NoiseOverlay, Fl
 src/lib/components/ui/            Buttons, fields, badges, modal, states
 src/lib/components/site/          Public header, footer, hero, event page
 src/lib/components/admin/         Shell, tables, editors
+src/lib/live/                     Live sessions: data model, protocol, client stores, motion
+src/lib/server/live/              Live hub (WebSocket), repository, admin token check, profanity filter
+src/lib/components/live/          Builder, presenter and phone components
+server.js                         Production entry: adapter-node handler + /live WebSocket
 firestore.rules                   Access boundaries
 ```
 
-## Not yet built
+## Live sessions
 
-The live Tech Quiz, Ice Breaker games, QR join flow and presenter view are out of scope for this pass.
+Quizzes, polls, reactions and Q&A run live: organisers build a session in `/admin/live`, present it on a projector (`/admin/live/{id}/present`), and the audience joins from phones with a 6-digit code, QR or link — no account.
+
+- **Real-time** runs over a WebSocket at `/live` (the `ws` package), served by the same Node process. In production start the app with `npm start` (runs `server.js`), not `node build` — the plain adapter-node entry has no WebSocket.
+- **Run one server process.** Live room state (timer, answers, scores) is held in memory and written through to Firestore. Several instances would need a shared pub/sub layer.
+- **The server is authoritative.** Admin HTTP calls and socket actions verify the organiser's Firebase ID token server-side (same rule as `isAdmin()` in `firestore.rules`). Correct answers never reach phones before the host reveals them.
+- **Storage:** `liveSessions/{id}` (slides embedded, in order), `liveSessions/{id}/participants`, and `liveJoinCodes/{code}` (reserves a code while a session is open). Without Admin SDK credentials the server falls back to an in-memory store — fine for local development, lost on restart.
+- **Testing on phones locally:** `npm run dev -- --host`, then open the presenter via your computer's LAN address (not `localhost`) so the QR code points somewhere phones can reach.
+- **Rehearsing before a deploy:** in `/admin/live` click **Demo session** (one slide of every type, ready to present), open **Present**, then fill the lobby with simulated phones: `npm run live:bots -- <join code> --players 10` (add `--url https://your-host` to test a deployed server). Bots answer every open slide with random answers.
+- **Tests:** `npm test` (Vitest) — slide sanitising, profanity filter, and the socket hub end to end.

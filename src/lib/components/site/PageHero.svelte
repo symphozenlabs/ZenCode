@@ -21,7 +21,7 @@
 	<div class="shell relative grid gap-10 py-20 md:py-24 lg:grid-cols-[1.5fr_1fr] lg:items-end">
 		<div>
 			<p class="eyebrow text-sun">{eyebrow}</p>
-			<h1 class="mt-4 font-display text-5xl leading-[1.02] font-semibold tracking-tight md:text-7xl">{title}</h1>
+			<h1 class="mt-4 font-display text-4xl leading-[1.05] font-semibold tracking-tight md:text-6xl">{title}</h1>
 			{#if description}
 				<p class="mt-6 max-w-2xl text-lg leading-relaxed text-cream/70">{description}</p>
 			{/if}

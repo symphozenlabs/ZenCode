@@ -53,7 +53,7 @@
 				{config.name}{config.edition ? ` ${config.edition}` : ''}
 			</p>
 			<h1
-				class="mt-6 font-display text-[clamp(3.4rem,11vw,8.5rem)] leading-[0.88] font-bold tracking-[-0.03em]"
+				class="mt-6 font-display text-[clamp(2.75rem,7.5vw,6.25rem)] leading-[0.88] font-bold tracking-[-0.03em]"
 				aria-label="Code. Create. Compete."
 			>
 				{#each words as w, i (w)}
@@ -124,7 +124,7 @@
 		<div use:reveal class="flex flex-wrap items-end justify-between gap-6">
 			<div>
 				<p class="eyebrow text-forest-700">The events</p>
-				<h2 class="mt-3 max-w-xl font-display text-4xl font-semibold tracking-tight text-forest-950 md:text-6xl">
+				<h2 class="mt-3 max-w-xl font-display text-3xl font-semibold tracking-tight text-forest-950 md:text-4xl">
 					Two stages. Build it, then pitch it.
 				</h2>
 			</div>
@@ -144,7 +144,7 @@
 							class="size-6 text-forest-700 transition-transform duration-200 group-hover:translate-x-1 group-hover:-translate-y-1"
 						/>
 					</div>
-					<h3 class="mt-16 font-display text-4xl font-semibold tracking-tight text-forest-950 md:text-5xl">
+					<h3 class="mt-16 font-display text-3xl font-semibold tracking-tight text-forest-950 md:text-4xl">
 						{ev.title}
 					</h3>
 					<p class="mt-4 max-w-md text-[17px] leading-relaxed text-muted-foreground">{ev.summary}</p>
@@ -177,7 +177,7 @@
 	<div class="shell relative">
 		<div use:reveal>
 			<p class="eyebrow text-sun">How it works</p>
-			<h2 class="mt-3 max-w-xl font-display text-4xl font-semibold tracking-tight md:text-5xl">
+			<h2 class="mt-3 max-w-xl font-display text-3xl font-semibold tracking-tight md:text-4xl">
 				From sign-up to stage in four steps.
 			</h2>
 		</div>
@@ -202,7 +202,7 @@
 	<div class="shell grid gap-12 lg:grid-cols-[1fr_1.6fr]">
 		<div use:reveal>
 			<p class="eyebrow text-forest-700">Schedule</p>
-			<h2 class="mt-3 font-display text-4xl font-semibold tracking-tight text-forest-950 md:text-5xl">
+			<h2 class="mt-3 font-display text-3xl font-semibold tracking-tight text-forest-950 md:text-4xl">
 				What happens when.
 			</h2>
 			<Button href="/schedule" variant="outline" size="lg" class="mt-8">Full schedule <ArrowRight class="size-4" /></Button>

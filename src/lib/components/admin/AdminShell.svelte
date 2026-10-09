@@ -11,7 +11,8 @@
 		LogOut,
 		Menu,
 		X,
-		ExternalLink
+		ExternalLink,
+		Radio
 	} from '@lucide/svelte';
 	import { adminAuth } from '$lib/stores/admin-auth.svelte';
 	import { registrations } from '$lib/stores/registrations.svelte';
@@ -32,6 +33,10 @@
 				{ href: '/admin/hackathon', label: 'Hackathon', icon: Code2 },
 				{ href: '/admin/pitch-fest', label: 'Pitch Fest', icon: Presentation }
 			]
+		},
+		{
+			label: 'Engage',
+			items: [{ href: '/admin/live', label: 'Live sessions', icon: Radio }]
 		},
 		{
 			label: 'System',

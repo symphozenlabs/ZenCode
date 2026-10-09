@@ -90,6 +90,16 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Live sessions are server-only (Admin SDK through the app's API and
+    // WebSocket). Browsers never read or write them directly — answers and
+    // scores must not be visible before the host reveals them.
+    match /liveSessions/{document=**} {
+      allow read, write: if false;
+    }
+    match /liveJoinCodes/{code} {
+      allow read, write: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

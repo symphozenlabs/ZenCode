@@ -14,7 +14,7 @@
 		<div class="shell relative flex flex-col items-start justify-between gap-8 py-16 md:flex-row md:items-end">
 			<div>
 				<p class="eyebrow text-sun">Registrations</p>
-				<h2 class="mt-3 font-display text-4xl font-semibold tracking-tight md:text-5xl">
+				<h2 class="mt-3 font-display text-3xl font-semibold tracking-tight md:text-4xl">
 					Your team. Your idea.<br />Your stage.
 				</h2>
 			</div>
