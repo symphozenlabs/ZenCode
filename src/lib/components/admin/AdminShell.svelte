@@ -12,7 +12,8 @@
 		LogOut,
 		Menu,
 		X,
-		ExternalLink
+		ExternalLink,
+		Radio
 	} from '@lucide/svelte';
 	import { adminAuth } from '$lib/stores/admin-auth.svelte';
 	import { registrations } from '$lib/stores/registrations.svelte';
@@ -34,6 +35,10 @@
 				{ href: '/admin/pitch-fest', label: 'Pitch Fest', icon: Presentation },
 				{ href: '/admin/games', label: 'Games', icon: Gamepad2 }
 			]
+		},
+		{
+			label: 'Engage',
+			items: [{ href: '/admin/live', label: 'Live sessions', icon: Radio }]
 		},
 		{
 			label: 'System',

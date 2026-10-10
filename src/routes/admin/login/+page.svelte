@@ -58,7 +58,7 @@
 			<a href="/" aria-label="ZenCode home"><Logo variant="full" class="w-40" /></a>
 			<div>
 				<p class="eyebrow text-sun">Control center</p>
-				<h1 class="mt-4 max-w-md font-display text-5xl leading-[1.05] font-semibold tracking-tight">
+				<h1 class="mt-4 max-w-md font-display text-4xl leading-[1.08] font-semibold tracking-tight">
 					Run the event from one place.
 				</h1>
 				<p class="mt-5 max-w-sm text-cream/60">Registrations, approvals, event settings and exports — for organisers only.</p>
