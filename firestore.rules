@@ -155,6 +155,17 @@ service cloud.firestore {
       }
     }
 
+    // Live quiz sessions (/admin/live, /play) are server-only: the Admin SDK
+    // reaches them through the app's API and WebSocket. Browsers never read
+    // or write them directly — answers and scores must stay hidden until the
+    // host reveals them. (Kept apart from the games' public liveSessions.)
+    match /liveQuizSessions/{document=**} {
+      allow read, write: if false;
+    }
+    match /liveQuizJoinCodes/{code} {
+      allow read, write: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

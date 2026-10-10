@@ -11,6 +11,7 @@ Built with SvelteKit (Svelte 5) on Vercel, Firebase Authentication (organisers o
 | Registration (from `main`) | `/`, `/check-in/{teamId}`, `/api/registration/send-confirmation` | Anyone |
 | Admin | `/admin/login`, `/admin`, `/admin/hackathon`, `/admin/pitch-fest`, `/admin/settings`, `/admin/games` | Organisers |
 | Live games | `/join`, `/join/{code}` (players, no account) · `/admin/games/tech-word-rush/live/{code}` (presenter) | Players / organisers |
+| Live sessions | `/admin/live`, `/admin/live/{id}/present` (organisers) · `/join`, `/play/{code}` (phones, no account) | Organisers / anyone with the code |
 
 The registration site is `main`'s app, unchanged: `src/App.svelte`, `src/lib/*.svelte`, `src/lib/firebase.js`, `src/lib/server/*.js` and `src/site.css` (main's `src/app.css`). It's mounted by `src/routes/(registration)/` with SSR off, so it behaves exactly like the original single-page app. Keep those files in sync with `main` rather than editing them here.
 
@@ -51,10 +52,28 @@ src/App.svelte, src/lib/*.svelte   Registration + check-in (from main)
 src/lib/server/*.js                Confirmation email, QR and PDF pass (from main)
 src/routes/(registration)/         Mounts main's app at / and /check-in/*
 src/routes/admin/                  Organiser control center
-src/routes/join/                   Player screens for live games
+src/routes/join/                   Code entry (games and live sessions) + game player screens
+src/routes/play/                   Phone screens for live sessions
+src/lib/live/                      Live sessions: data model, protocol, client stores, motion
+src/lib/server/live/               Live hub (WebSocket), repository, admin token check
+server.js                          Production entry: adapter-node handler + /live WebSocket
 src/routes/api/                    Admin check, games, confirmation email
 src/lib/games/                     Game rules, questions, client API
 src/lib/server/games/              Server-side game logic
 src/lib/components/                Admin, games, motion and UI components
 firestore.rules                    Access boundaries
 ```
+
+## Live sessions
+
+Quizzes, polls, reactions and Q&A run live: organisers build a session in `/admin/live`, present it on a projector (`/admin/live/{id}/present`), and the audience joins from phones with a 6-digit code (typed at `/join`, which also takes game codes), QR or link — no account.
+
+- **Real-time** runs over a WebSocket at `/live` (the `ws` package), served by the same Node process. In production start the app with `npm start` (runs `server.js`), not `node build` — the plain adapter-node entry has no WebSocket.
+- **Run one server process.** Live room state (timer, answers, scores) is held in memory and written through to Firestore. Several instances would need a shared pub/sub layer.
+- **The server is authoritative.** Admin HTTP calls and socket actions verify the organiser's Firebase ID token server-side (same rule as `isAdmin()` in `firestore.rules`). Correct answers never reach phones before the host reveals them.
+- **Storage:** `liveQuizSessions/{id}` (slides embedded, in order), `liveQuizSessions/{id}/participants`, and `liveQuizJoinCodes/{code}` (reserves a code while a session is open). Without Admin SDK credentials the server falls back to an in-memory store — fine for local development, lost on restart.
+- **Testing on phones locally:** `npm run dev -- --host`, then open the presenter via your computer's LAN address (not `localhost`) so the QR code points somewhere phones can reach.
+- **Rehearsing before a deploy:** in `/admin/live` click **Demo session** (one slide of every type, ready to present), open **Present**, then fill the lobby with simulated phones: `npm run live:bots -- <join code> --players 10` (add `--url https://your-host` to test a deployed server). Bots answer every open slide with random answers.
+- **Tests:** `npm test` (Vitest) — slide sanitising, profanity filter, and the socket hub end to end.
+
+On Vercel, see **Live sessions on Vercel** above.
