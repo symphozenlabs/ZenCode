@@ -6,10 +6,10 @@ import type { LiveSession, SessionSummary, StoredParticipant, StoredResponse } f
  * when no Admin SDK credentials exist (local dev and tests). Only the server
  * touches these collections — firestore.rules deny all client access.
  *
- *   liveSessions/{id}                       session + ordered slides
- *   liveSessions/{id}/participants/{pid}    nickname, avatar, score, secret
- *   liveSessions/{id}/responses/{slide_pid} one per participant per slide (create-only)
- *   liveJoinCodes/{code}                    reserves a code while a session is open
+ *   liveQuizSessions/{id}                       session + ordered slides
+ *   liveQuizSessions/{id}/participants/{pid}    nickname, avatar, score, secret
+ *   liveQuizSessions/{id}/responses/{slide_pid} one per participant per slide (create-only)
+ *   liveQuizJoinCodes/{code}                    reserves a code while a session is open
  */
 export interface LiveRepo {
 	listSessions(): Promise<SessionSummary[]>;
@@ -111,16 +111,22 @@ export class MemoryRepo implements LiveRepo {
 	}
 }
 
+// Own collections: `liveSessions` belongs to the Tech Word Rush game, whose
+// rules let anyone read a session doc. Quiz sessions hold the answers, so they
+// live apart and are reached only through the server (Admin SDK).
+const SESSIONS = 'liveQuizSessions';
+const JOIN_CODES = 'liveQuizJoinCodes';
+
 export class FirestoreRepo implements LiveRepo {
 	constructor(private db: Firestore) {}
 
-	#session = (id: string) => this.db.collection('liveSessions').doc(id);
+	#session = (id: string) => this.db.collection(SESSIONS).doc(id);
 	#players = (id: string) => this.#session(id).collection('participants');
 	#responses = (id: string) => this.#session(id).collection('responses');
 
 	async listSessions() {
 		const snap = await this.db
-			.collection('liveSessions')
+			.collection(SESSIONS)
 			.orderBy('updatedAt', 'desc')
 			.limit(200)
 			.select('title', 'status', 'joinCode', 'slideCount', 'updatedAt')
@@ -154,7 +160,7 @@ export class FirestoreRepo implements LiveRepo {
 	}
 	async claimJoinCode(code: string, sessionId: string) {
 		try {
-			await this.db.collection('liveJoinCodes').doc(code).create({ sessionId, createdAt: Date.now() });
+			await this.db.collection(JOIN_CODES).doc(code).create({ sessionId, createdAt: Date.now() });
 			return true;
 		} catch (err) {
 			if ((err as { code?: number }).code === 6) return false; // ALREADY_EXISTS
@@ -162,10 +168,10 @@ export class FirestoreRepo implements LiveRepo {
 		}
 	}
 	async releaseJoinCode(code: string) {
-		await this.db.collection('liveJoinCodes').doc(code).delete();
+		await this.db.collection(JOIN_CODES).doc(code).delete();
 	}
 	async resolveJoinCode(code: string) {
-		const d = await this.db.collection('liveJoinCodes').doc(code).get();
+		const d = await this.db.collection(JOIN_CODES).doc(code).get();
 		return d.exists ? (d.get('sessionId') as string) : null;
 	}
 	async listParticipants(sessionId: string) {
