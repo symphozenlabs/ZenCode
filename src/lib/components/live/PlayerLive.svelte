@@ -10,6 +10,8 @@
 	import NumberInput from './inputs/NumberInput.svelte';
 	import OrderInput from './inputs/OrderInput.svelte';
 	import Confetti from './Confetti.svelte';
+	import { SLIDE_META } from '$lib/live/slides';
+	import { SLIDE_ACCENT, SLIDE_ICONS } from './slide-icons';
 
 	let { room }: { room: PlayerRoom } = $props();
 
@@ -17,6 +19,9 @@
 	const slide = $derived(s.slide);
 	const answer = $derived(room.myAnswer);
 	const confirmed = $derived(!!s.answered || !!room.pending?.confirmed);
+	// The big screen's kind chip and accent, so phone and projector feel like one thing.
+	const accent = $derived(slide ? SLIDE_ACCENT[slide.kind] : 'var(--color-sun)');
+	const KindIcon = $derived(slide ? SLIDE_ICONS[slide.kind] : null);
 
 	type Screen = 'leaderboard' | 'ready' | 'answer' | 'submitted' | 'timesup' | 'result' | 'thanks' | 'bigscreen';
 	const screen = $derived.by((): Screen => {
@@ -47,16 +52,34 @@
 	};
 </script>
 
-<div class="flex flex-1 flex-col">
-	<!-- Progress + timer -->
+<div class="flex flex-1 flex-col" style:--accent={accent}>
+	<!-- Kind + progress + timer -->
 	{#if slide && s.view === 'slide'}
-		<div class="flex h-12 items-center justify-between gap-3">
-			<p class="text-[13px] font-medium text-muted-foreground tabular">Question {s.index + 1} of {s.total}</p>
+		<div class="flex min-h-12 items-center justify-between gap-3">
+			<div class="flex min-w-0 items-center gap-2">
+				<span
+					class="inline-flex min-w-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-[0.12em] uppercase ring-1"
+					style:color="color-mix(in oklab, var(--accent) 45%, var(--color-forest-950))"
+					style:background="color-mix(in srgb, var(--accent) 18%, var(--color-card))"
+					style:--tw-ring-color="color-mix(in srgb, var(--accent) 45%, transparent)"
+				>
+					{#if KindIcon}<KindIcon class="size-3.5 shrink-0" />{/if}
+					<span class="truncate">{SLIDE_META[slide.kind].label}</span>
+				</span>
+				<span class="shrink-0 text-[13px] font-medium text-muted-foreground tabular" aria-label="Question {s.index + 1} of {s.total}">{s.index + 1}/{s.total}</span>
+			</div>
 			{#if s.phase === 'open' && s.endsAt != null && !answer}
-				<div in:pop={{ duration: DUR.layout }}>
+				<div class="shrink-0" in:pop={{ duration: DUR.layout }}>
 					<CountdownRing endsAt={s.endsAt} clockOffset={room.clockOffset} totalMs={slide.timeLimit * 1000} tone="light" class="size-12" />
 				</div>
 			{/if}
+		</div>
+		<div class="mt-2 mb-5 h-1 overflow-hidden rounded-full bg-forest-950/8" aria-hidden="true">
+			<div
+				class="h-full rounded-full transition-[width] duration-700 ease-out-quart"
+				style:width="{((s.index + 1) / s.total) * 100}%"
+				style:background="linear-gradient(90deg, color-mix(in srgb, var(--accent) 55%, var(--color-green-300)), var(--accent))"
+			></div>
 		</div>
 	{/if}
 
@@ -88,7 +111,7 @@
 						<p class="mt-3 text-sm text-muted-foreground">Answers open when the timer starts</p>
 					</div>
 				{:else if screen === 'answer' && slide}
-					<h1 class="mb-5 font-display text-xl leading-snug font-semibold text-balance text-forest-950">{slide.question}</h1>
+					<h1 class="mb-6 font-display text-2xl leading-snug font-semibold text-balance wrap-break-word text-forest-950">{slide.question}</h1>
 					{#if slide.input === 'tap'}
 						<TapOptions
 							{slide}

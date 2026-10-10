@@ -15,6 +15,7 @@
 	import AvatarPicker from '$lib/components/live/AvatarPicker.svelte';
 	import ReconnectBanner from '$lib/components/live/ReconnectBanner.svelte';
 	import PlayerLive from '$lib/components/live/PlayerLive.svelte';
+	import { SLIDE_ACCENT } from '$lib/components/live/slide-icons';
 
 	const code = page.params.code!;
 	const room = new PlayerRoom(code);
@@ -64,19 +65,31 @@
 	}
 
 	const me = $derived(room.state?.me);
+	// Same mood as the big screen: the wash takes the current slide kind's colour.
+	const accent = $derived(room.slide?.slide ? SLIDE_ACCENT[room.slide.slide.kind] : 'var(--color-sun)');
 </script>
 
 <svelte:head><title>{room.state?.title || title || 'Live session'} — ZenCode</title></svelte:head>
 
 <ReconnectBanner status={room.phase === 'ready' || room.phase === 'connecting' ? room.socket.status : 'open'} />
 
-<div class="flex min-h-dvh flex-col bg-cream text-ink">
-	<header class="flex items-center justify-between gap-3 px-4 pt-5">
+<div class="relative isolate flex min-h-dvh flex-col overflow-x-clip bg-cream text-ink" style:--accent={accent}>
+	<!-- Ambient wash, like the presenter's backdrop -->
+	<div
+		aria-hidden="true"
+		class="pointer-events-none fixed inset-0 -z-10"
+		style:background="radial-gradient(90% 45% at 0% 0%, color-mix(in srgb, var(--color-green-300) 16%, transparent), transparent 70%), radial-gradient(100% 50% at 100% 100%, color-mix(in srgb, var(--accent) 24%, transparent), transparent 70%)"
+	></div>
+
+	<header class="mx-auto flex w-full max-w-md items-center justify-between gap-3 px-4 pt-[max(1rem,env(safe-area-inset-top))]">
 		<Logo tone="dark" />
-		<span class="font-mono text-xs text-muted-foreground tabular">{formatCode(code)}</span>
+		<span class="inline-flex items-center gap-2 rounded-full bg-card/80 px-3 py-1.5 shadow-sm ring-1 ring-border backdrop-blur">
+			<span class="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">Room</span>
+			<span class="font-mono text-sm font-semibold text-forest-950 tabular">{formatCode(code)}</span>
+		</span>
 	</header>
 
-	<main class="mx-auto flex w-full max-w-sm flex-1 flex-col px-4 pt-8 pb-6">
+	<main class="mx-auto flex w-full max-w-md flex-1 flex-col px-4 pt-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
 		{#if room.phase === 'missing'}
 			<div class="my-auto text-center" in:rise>
 				<div class="mx-auto grid size-12 place-items-center rounded-lg bg-secondary text-secondary-foreground"><SearchX class="size-5" /></div>
@@ -131,7 +144,7 @@
 					<AvatarPicker bind:value={avatar} />
 				</div>
 
-				<div class="sticky bottom-0 mt-auto bg-cream pt-6 pb-[env(safe-area-inset-bottom)]">
+				<div class="sticky bottom-0 mt-auto bg-linear-to-t from-cream via-cream/95 to-transparent pt-6 pb-[env(safe-area-inset-bottom)]">
 					<Button type="submit" size="xl" class="w-full" loading={room.phase === 'joining'}>
 						{room.phase === 'joining' ? 'Joining…' : 'Join'}
 						{#if room.phase !== 'joining'}<ArrowRight class="size-4" />{/if}
