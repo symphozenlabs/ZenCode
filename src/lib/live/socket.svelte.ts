@@ -1,5 +1,6 @@
 import { untrack } from 'svelte';
-import { SOCKET_PATH, type ClientMessage, type ServerMessage } from './protocol';
+import type { ClientMessage, ServerMessage } from './protocol';
+import { liveSocketUrl } from './origin';
 
 export type SocketStatus = 'connecting' | 'open' | 'reconnecting' | 'closed';
 
@@ -81,8 +82,7 @@ export class LiveSocket {
 
 	#connect() {
 		this.#timer = null;
-		const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-		const ws = new WebSocket(`${proto}://${location.host}${SOCKET_PATH}`);
+		const ws = new WebSocket(liveSocketUrl());
 		this.#ws = ws;
 		this.status = this.#hasDropped ? 'reconnecting' : 'connecting';
 

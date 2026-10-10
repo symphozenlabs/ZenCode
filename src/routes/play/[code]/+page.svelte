@@ -6,6 +6,7 @@
 	import { PlayerRoom } from '$lib/live/player.svelte';
 	import { cleanNickname, formatCode, JOIN_CODE_RE, nicknameError } from '$lib/live/session';
 	import { LIMITS } from '$lib/live/types';
+	import { liveApi } from '$lib/live/origin';
 	import { DUR, pop, rise, softFade } from '$lib/live/motion';
 	import Logo from '$lib/components/site/Logo.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -34,7 +35,7 @@
 		const stop = room.socket.start();
 		// New phone: confirm the code before asking for a nickname.
 		if (room.phase === 'profile') {
-			fetch(`/api/live/join/${code}`)
+			fetch(liveApi(`/join/${code}`))
 				.then(async (res) => {
 					if (res.ok) title = (await res.json()).title;
 					else if (res.status === 404) room.phase = 'missing';
