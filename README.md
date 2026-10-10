@@ -29,6 +29,15 @@ The registration site is `main`'s app, unchanged: `src/App.svelte`, `src/lib/*.s
 
 On Vercel, set the same variables in the project settings.
 
+### Live sessions on Vercel
+
+Live sessions need a long-running server (WebSockets plus in-memory rooms), which Vercel can't host. Run `server.js` on a Node host (Render, Railway, Fly, a VM) and point the Vercel site at it:
+
+1. **Live server** — build `npm ci && npm run build`, start `npm start` (Node 22.9+ for `--env-file-if-exists`; listens on `PORT`). Give it the same env vars as Vercel, plus `LIVE_ALLOWED_ORIGINS=https://<your-vercel-domain>` (comma-separated if several).
+2. **Vercel** — add `VITE_LIVE_ORIGIN=https://<live-server-domain>` and redeploy. The presenter, admin live pages and `/play` phones then talk to the live server.
+
+Without `VITE_LIVE_ORIGIN` everything stays on the same host, which is what `npm run dev` and a plain `npm start` deployment use.
+
 ## How data flows
 
 - **Registrations** are written by the public form straight to `hackathon_registered_participants` / `pitchfest_registered_participants`; `firestore.rules` validates every new document. Admins can mark teams rejected, edit or delete them.

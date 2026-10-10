@@ -1,4 +1,5 @@
 import { auth } from '$lib/firebase/auth';
+import { liveApi } from './origin';
 
 export class ApiError extends Error {
 	constructor(
@@ -19,7 +20,7 @@ export async function idToken(): Promise<string> {
 export async function adminApi<T = unknown>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
 	let res: Response;
 	try {
-		res = await fetch(`/api/live${path}`, {
+		res = await fetch(liveApi(path), {
 			method: init.method ?? 'GET',
 			headers: {
 				authorization: `Bearer ${await idToken()}`,

@@ -1,10 +1,13 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { flushSync } from 'svelte';
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { LiveSocket } from './socket.svelte';
+
+// No SvelteKit runtime here: no live origin set, so the socket uses this host.
+vi.mock('$env/dynamic/public', () => ({ env: {} }));
 
 // This project resolves with the browser condition, which maps `ws` to its
 // browser stub — load the Node server class from its file instead.
