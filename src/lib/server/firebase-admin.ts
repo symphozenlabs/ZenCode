@@ -13,7 +13,8 @@ function credential() {
 		return cert({
 			projectId: env.FIREBASE_PROJECT_ID,
 			clientEmail: env.FIREBASE_CLIENT_EMAIL,
-			privateKey: env.FIREBASE_PRIVATE_KEY.replace(/\n/g, '\n')
+			// Hosts like Vercel keep the key on one line with literal "\n" (sometimes quoted)
+			privateKey: env.FIREBASE_PRIVATE_KEY.replace(/^"|"$/g, '').replace(/\\n/g, '\n')
 		});
 	}
 	return applicationDefault();
