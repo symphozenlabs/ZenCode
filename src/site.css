@@ -41,13 +41,23 @@
   --radius-badge: 4px;
 }
 
-*, *::before, *::after {
+/*
+ * Element-level rules apply only while the registration app is mounted
+ * (#app, from +layout.svelte). SvelteKit keeps this stylesheet after a
+ * client-side navigation, and unlayered rules here would otherwise beat the
+ * admin's Tailwind utilities (which live in cascade layers). :where() keeps
+ * the original specificity, so the registration page looks the same.
+ */
+:where(#app), :where(#app) *, :where(#app) *::before, :where(#app) *::after {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
 }
 
-html, body {
+html:where(:has(#app)), html:where(:has(#app)) body {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
   min-height: 100%;
   font-family: var(--font-family);
   color: var(--text-primary);
@@ -57,14 +67,14 @@ html, body {
 }
 
 /* Base utility & typography */
-h1, h2, h3, h4, h5, h6 {
+:where(#app) :is(h1, h2, h3, h4, h5, h6) {
   font-family: var(--font-family);
   color: var(--text-primary);
   font-weight: 600;
   letter-spacing: -0.01em;
 }
 
-button, input, select, textarea {
+:where(#app) :is(button, input, select, textarea) {
   font-family: inherit;
 }
 
@@ -184,13 +194,13 @@ button, input, select, textarea {
 }
 
 /* Focus visibility */
-:focus-visible {
+:where(#app) :focus-visible {
   outline: 2px solid var(--support-green);
   outline-offset: 2px;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  :where(#app) *, :where(#app) *::before, :where(#app) *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
