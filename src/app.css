@@ -6,7 +6,8 @@
  * foundation, cream neutrals, sun accent, orange reserved for attention).
  * Every color in the app comes from these tokens — no raw hex in components.
  */
-@theme {
+/* static: emit every token, since chart colours are chosen at runtime (var(--color-chart-${n})) */
+@theme static {
 	/* Brand — forest scale */
 	--color-forest-950: #0d2d20;
 	--color-forest-900: #133a29;
@@ -217,6 +218,48 @@
 	transform: none;
 }
 
+/*
+ * Light stage for projectors. A projector can't show black — it just adds
+ * light — so dark slides turn into a murky grey on a wall. Here the stage is
+ * warm paper, text is deep ink, and series colours are saturated mid-tones
+ * that survive wash-out (each still takes dark text on top). Components keep
+ * using the stage/cream tokens; this class re-points them.
+ */
+.stage-light {
+	color-scheme: light;
+	--color-stage: #fbf8f1;
+	--color-stage-raised: #ffffff;
+	--color-stage-line: #ded7c7;
+	--color-cream: #14213a; /* foreground ink on the stage */
+	--color-sun: #f5a700;
+	--color-sun-light: #ffc53d;
+	--color-green-300: #23985a;
+	--color-chart-1: #2fb36b; /* leaf */
+	--color-chart-2: #f5a700; /* marigold */
+	--color-chart-3: #12b5a5; /* lagoon */
+	--color-chart-4: #f26a4b; /* coral */
+	--color-chart-5: #7b7cf2; /* periwinkle */
+	--color-chart-6: #e45a9f; /* berry */
+	--color-correct-stage: #15803d;
+	--color-wrong-stage: #d4291c;
+}
+/* Gold fills stay bright; gold text needs more weight on paper */
+.stage-light .text-sun {
+	color: #b06a00;
+}
+
+/*
+ * Frosted surface for stage content that would otherwise sit straight on the
+ * animated backdrop (dot waves, colour wash) — charts, captions, counters.
+ */
+.stage-panel {
+	background: color-mix(in srgb, var(--color-stage-raised) 88%, transparent);
+	border: 1px solid var(--color-stage-line);
+	box-shadow: 0 18px 50px -24px color-mix(in srgb, var(--color-cream) 30%, transparent);
+	backdrop-filter: blur(14px) saturate(1.1);
+	-webkit-backdrop-filter: blur(14px) saturate(1.1);
+}
+
 /* ---- Live presenter effects ---------------------------------------------- */
 
 /* A band of light that crosses the stage on every scene change */
@@ -336,6 +379,109 @@
 	}
 	to {
 		transform: translate(-50%, -50%) scale(1);
+		opacity: 0;
+	}
+}
+
+/* Presenter backdrop: aurora ribbons drifting behind the stage */
+@keyframes aurora-a {
+	0%,
+	100% {
+		transform: translate3d(-8%, -4%, 0) rotate(-8deg) scale(1);
+	}
+	50% {
+		transform: translate3d(10%, 6%, 0) rotate(6deg) scale(1.15);
+	}
+}
+@keyframes aurora-b {
+	0%,
+	100% {
+		transform: translate3d(6%, 4%, 0) rotate(10deg) scale(1.1);
+	}
+	50% {
+		transform: translate3d(-12%, -6%, 0) rotate(-4deg) scale(0.95);
+	}
+}
+@keyframes aurora-c {
+	0%,
+	100% {
+		transform: translate3d(0, 0, 0) scale(1);
+		opacity: 0.55;
+	}
+	50% {
+		transform: translate3d(-6%, 8%, 0) scale(1.25);
+		opacity: 0.9;
+	}
+}
+
+/* Endless horizontal scroll; the track holds its items twice */
+@keyframes marquee {
+	from {
+		transform: translate3d(0, 0, 0);
+	}
+	to {
+		transform: translate3d(-50%, 0, 0);
+	}
+}
+
+/* Light rays turning behind the winner */
+@keyframes rays-spin {
+	from {
+		transform: translate(-50%, -50%) rotate(0deg);
+	}
+	to {
+		transform: translate(-50%, -50%) rotate(360deg);
+	}
+}
+
+/* Stage spotlights hunting across the room, then settling */
+@keyframes beam-left {
+	0% {
+		transform: rotate(-38deg);
+		opacity: 0;
+	}
+	15% {
+		opacity: 1;
+	}
+	45% {
+		transform: rotate(14deg);
+	}
+	70% {
+		transform: rotate(-20deg);
+	}
+	100% {
+		transform: rotate(-24deg);
+		opacity: 0.55;
+	}
+}
+@keyframes beam-right {
+	0% {
+		transform: rotate(38deg);
+		opacity: 0;
+	}
+	15% {
+		opacity: 1;
+	}
+	45% {
+		transform: rotate(-14deg);
+	}
+	70% {
+		transform: rotate(20deg);
+	}
+	100% {
+		transform: rotate(24deg);
+		opacity: 0.55;
+	}
+}
+
+/* A ring that expands and fades once (new answer landing, winner reveal) */
+@keyframes ring-out {
+	from {
+		transform: scale(0.6);
+		opacity: 0.9;
+	}
+	to {
+		transform: scale(2.4);
 		opacity: 0;
 	}
 }

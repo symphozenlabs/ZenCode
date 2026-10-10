@@ -46,7 +46,7 @@
 		link: 'text-forest-700 underline-offset-4 hover:underline px-0!',
 		// Public site
 		sun: 'bg-sun text-forest-950 hover:bg-sun-light font-semibold',
-		stage: 'border border-green-300/30 text-cream hover:border-green-300/60 hover:bg-white/5'
+		stage: 'border border-green-300/30 text-cream hover:border-green-300/60 hover:bg-cream/5'
 	};
 
 	const sizes: Record<ButtonSize, string> = {

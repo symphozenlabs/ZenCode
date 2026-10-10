@@ -67,10 +67,10 @@
 	const top = $derived(groups[0]?.key);
 </script>
 
-<div class="relative h-full overflow-hidden" bind:clientWidth={w} bind:clientHeight={h}>
+<div class="stage-panel relative h-full overflow-hidden rounded-2xl" bind:clientWidth={w} bind:clientHeight={h}>
 	{#if !groups.length}
 		<div class="grid h-full place-items-center">
-			<p class="flex items-center gap-3 text-stage-md text-cream/50">
+			<p class="flex items-center gap-3 text-stage-md text-cream/65">
 				<span class="flex gap-1.5" aria-hidden="true">
 					{#each [0, 1, 2] as i (i)}<span class="size-2 animate-pulse-dot rounded-full bg-chart-3" style:animation-delay="{i * 200}ms"></span>{/each}
 				</span>

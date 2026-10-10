@@ -36,7 +36,7 @@ export function adminApp(): App {
 			getApps()[0] ??
 			initializeApp({
 				credential: credential(),
-				projectId: env.FIREBASE_PROJECT_ID || publicEnv.PUBLIC_FIREBASE_PROJECT_ID || undefined
+				projectId: env.FIREBASE_PROJECT_ID || publicEnv.VITE_FIREBASE_PROJECT_ID || undefined
 			});
 	}
 	return app;

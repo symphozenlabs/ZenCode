@@ -1,5 +1,8 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { untrack } from 'svelte';
+	import { useGsap } from '$lib/live/gsap';
+	import { reduced } from '$lib/live/motion';
 	import type { Component } from 'svelte';
 	import {
 		Power,
@@ -23,8 +26,6 @@
 	import { DUR, rise, sink, softFade, warpIn, warpOut } from '$lib/live/motion';
 	import { SLIDE_ACCENT } from '$lib/components/live/slide-icons';
 	import Logo from '$lib/components/site/Logo.svelte';
-	import AnimatedGrid from '$lib/components/motion/AnimatedGrid.svelte';
-	import GlowBackground from '$lib/components/motion/GlowBackground.svelte';
 	import NoiseOverlay from '$lib/components/motion/NoiseOverlay.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
@@ -34,6 +35,7 @@
 	import PresenterLeaderboard from '$lib/components/live/PresenterLeaderboard.svelte';
 	import JoinChip from '$lib/components/live/JoinChip.svelte';
 	import ReconnectBanner from '$lib/components/live/ReconnectBanner.svelte';
+	import StageBackdrop from '$lib/components/live/StageBackdrop.svelte';
 
 	const sessionId = page.params.id!;
 	const room = new HostRoom(sessionId);
@@ -116,29 +118,45 @@
 		!session ? 'connecting' : session.status === 'ended' ? 'ended' : live ? `${live.view}:${slide?.id}` : session.joinCode ? 'lobby' : 'connecting'
 	);
 
+	// ---- Scene change: a skewed curtain of colour wipes across the stage ----------
+	let curtain = $state<HTMLDivElement>();
+	let seenView = '';
+	$effect(() => {
+		const v = view;
+		untrack(() => {
+			const first = !seenView;
+			seenView = v;
+			if (first || !curtain || reduced() || v === 'connecting') return;
+			const g = useGsap();
+			const bands = Array.from(curtain.children);
+			g.killTweensOf(bands);
+			g.timeline()
+				.set(curtain, { display: 'block' })
+				.fromTo(bands, { xPercent: -130 }, { xPercent: 0, duration: 0.45, ease: 'power3.in', stagger: 0.07 })
+				.to(bands, { xPercent: 130, duration: 0.7, ease: 'expo.out', stagger: 0.07 }, '+=0.08')
+				.set(curtain, { display: 'none' });
+		});
+	});
+
 	const iconBtn =
-		'grid size-10 place-items-center rounded-md text-cream/70 transition-colors duration-150 hover:bg-white/5 hover:text-cream disabled:pointer-events-none disabled:opacity-30';
+		'grid size-10 place-items-center rounded-md text-cream/70 transition-colors duration-150 hover:bg-cream/5 hover:text-cream disabled:pointer-events-none disabled:opacity-30';
 </script>
 
 <svelte:head><title>{session?.title ?? 'Presenter'} — ZenCode Live</title></svelte:head>
 <svelte:window {onkeydown} />
 
-<div class="fixed inset-0 overflow-hidden bg-stage font-sans text-cream">
-	<AnimatedGrid size={72} animated={!live} />
-	<GlowBackground class="opacity-50" />
-	<!-- Ambient glow tinted by the current slide kind -->
-	<div
-		aria-hidden="true"
-		class="pointer-events-none absolute -bottom-1/3 left-1/2 h-[80%] w-[110%] -translate-x-1/2 rounded-full opacity-35 blur-3xl transition-[background] duration-[1600ms]"
-		style:background="radial-gradient(closest-side, color-mix(in srgb, {accent} 45%, transparent), transparent)"
-	></div>
-	<NoiseOverlay opacity={0.05} />
-	<!-- A band of light crosses the stage on every scene change -->
-	{#key view}
-		<div aria-hidden="true" class="pointer-events-none absolute inset-0 z-10 overflow-hidden motion-reduce:hidden">
-			<div class="stage-sweep absolute inset-y-0 -left-1/4 w-1/3" style:background="linear-gradient(90deg, transparent, color-mix(in srgb, {accent} 16%, transparent), transparent)"></div>
+<!-- Light, projector-friendly palette (.stage-light in app.css); everything inside reads the stage tokens -->
+<div class="stage-light fixed inset-0 overflow-hidden bg-stage font-sans text-cream">
+	<StageBackdrop {accent} pulse={view} />
+	<NoiseOverlay opacity={0.02} />
+	<!-- Scene-change curtain (driven by GSAP above): accent, tint, then paper with the logo -->
+	<div bind:this={curtain} aria-hidden="true" class="pointer-events-none absolute inset-0 z-30 hidden overflow-hidden">
+		<div class="absolute -inset-x-[20%] inset-y-0 -skew-x-12" style:background={accent}></div>
+		<div class="absolute -inset-x-[20%] inset-y-0 -skew-x-12" style:background="color-mix(in srgb, {accent} 45%, var(--color-stage))"></div>
+		<div class="absolute -inset-x-[20%] inset-y-0 grid -skew-x-12 place-items-center bg-stage">
+			<span class="skew-x-12"><Logo variant="horizontal" class="scale-[2.2]" /></span>
 		</div>
-	{/key}
+	</div>
 
 	<ReconnectBanner status={room.socket.status} tone="stage" />
 
@@ -155,7 +173,7 @@
 		<!-- Stack: outgoing and incoming views share one cell, so nothing shifts -->
 		<div class="relative mt-[4vh] grid min-h-0 flex-1 [grid-template-areas:'stack'] *:[grid-area:stack] *:min-h-0">
 			{#key view}
-				<div class="h-full" in:warpIn={{ duration: 1000, delay: 260 }} out:warpOut={{ duration: 420 }}>
+				<div class="h-full" in:warpIn={{ duration: 900, delay: 520 }} out:warpOut={{ duration: 420 }}>
 					{#if fatal}
 						<div class="grid h-full place-items-center text-center">
 							<div>

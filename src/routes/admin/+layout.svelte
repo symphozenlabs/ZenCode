@@ -10,7 +10,10 @@
 	const isLogin = $derived(page.url.pathname === '/admin/login');
 	// Presenter screens are projected full-screen, so they skip the admin shell
 	// (but keep the same admin check below).
-	const isPresenter = $derived(page.url.pathname.startsWith('/admin/games/tech-word-rush/live/'));
+	const isPresenter = $derived(
+		page.url.pathname.startsWith('/admin/games/tech-word-rush/live/') ||
+			/^\/admin\/live\/[^/]+\/present\/?$/.test(page.url.pathname)
+	);
 
 	adminAuth.start();
 

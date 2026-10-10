@@ -245,10 +245,8 @@ export class Room {
 		this.#closeTimer = setTimeout(
 			() => {
 				if (this.currentRun !== run || run.phase !== 'open') return;
-				run.phase = 'closed';
-				this.#clearTimers();
-				this.flush();
-				this.#changed();
+				// Time's up: close and show the results (and the answer) straight away
+				this.reveal();
 			},
 			Math.max(0, endsAt - Date.now())
 		);
@@ -330,13 +328,11 @@ export class Room {
 		this.#changed();
 	}
 
+	/** Closing early works like the timer running out: results appear at once. */
 	closeResponses() {
 		const { run } = this.#need();
 		if (run.phase !== 'open') return;
-		run.phase = 'closed';
-		this.#clearTimers();
-		this.flush();
-		this.#changed();
+		this.reveal();
 	}
 
 	reveal() {

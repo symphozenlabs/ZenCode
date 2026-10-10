@@ -378,6 +378,18 @@ describe('running a quiz slide', () => {
 		expect((await a.c.next('error')).message).toMatch(/Time’s up/);
 	});
 
+	it('reveals the results and the answer by itself when the timer runs out', async () => {
+		const { h, code } = await liveRoom([quizSlide(1)]);
+		const a = await player(code, 'Ada');
+		await start(h);
+		h.send({ t: 'start_timer' });
+		const quizId = (await a.c.next('player_state', (m) => m.state.phase === 'open')).state.slide!.id;
+		a.c.send(tap(quizId, 'paris'));
+		const reveal = await h.next('answer_reveal', undefined, 3000);
+		expect(reveal.slideId).toBe(quizId);
+		expect((await a.c.next('player_state', (m) => !!m.state.reveal)).state.reveal!.correct).toBe(true);
+	});
+
 	it('reset takes back points and reopens the slide', async () => {
 		const { h, code } = await liveRoom();
 		const a = await player(code, 'Ada');

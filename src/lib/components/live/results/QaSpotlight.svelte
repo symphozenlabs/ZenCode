@@ -13,7 +13,7 @@
 			aria-hidden="true"
 		></span>
 	{/each}
-	<div class="relative">
+	<div class="stage-panel relative rounded-3xl px-[4vw] py-[4vh]">
 		<span class="mx-auto grid size-[clamp(4.5rem,12vh,7rem)] place-items-center rounded-full bg-sun text-forest-950 shadow-[0_0_80px_-10px_var(--color-sun)]" in:burst={{ duration: 1000 }}>
 			<MessagesSquare class="size-1/2" />
 		</span>

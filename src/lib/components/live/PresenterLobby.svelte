@@ -54,7 +54,7 @@
 			<button
 				type="button"
 				onclick={copyLink}
-				class="mt-[2vh] inline-flex h-10 items-center gap-2 rounded-md px-3 font-mono text-sm text-cream/60 ring-1 ring-stage-line transition-colors duration-150 hover:bg-white/5 hover:text-cream"
+				class="mt-[2vh] inline-flex h-10 items-center gap-2 rounded-md px-3 font-mono text-sm text-cream/60 ring-1 ring-stage-line transition-colors duration-150 hover:bg-cream/5 hover:text-cream"
 				in:rise={{ y: 10, duration: DUR.stage, delay: 480 }}
 			>
 				{#if copied}<Check class="size-4 text-green-300" /> Link copied{:else}<LinkIcon class="size-4" /> {joinUrl.replace(/^https?:\/\//, '')}{/if}
@@ -62,7 +62,7 @@
 		</div>
 
 		<div
-			class="hidden justify-self-end rounded-xl bg-cream p-[1vw] text-forest-950 shadow-[0_0_80px_-20px_var(--color-sun)] lg:block"
+			class="hidden justify-self-end rounded-xl bg-white p-[1vw] text-forest-950 shadow-[0_20px_60px_-20px_color-mix(in_srgb,var(--color-cream)_35%,transparent)] ring-1 ring-stage-line lg:block"
 			in:pop={{ duration: DUR.stage, delay: 260, from: 0.85 }}
 		>
 			<QrCode value={joinUrl} label="QR code to join" class="size-[min(22vw,36vh)]" />
@@ -70,8 +70,8 @@
 	</div>
 
 	<!-- Players -->
-	<section class="mt-[3vh] flex min-h-[30vh] flex-col" aria-label="Players">
-		<div class="flex items-center gap-3 border-t border-stage-line pt-[2vh]">
+	<section class="stage-panel mt-[3vh] flex min-h-[30vh] flex-col rounded-2xl px-[1.5vw] pb-[2vh]" aria-label="Players">
+		<div class="flex items-center gap-3 pt-[2vh]">
 			<Users class="size-6 text-green-300" aria-hidden="true" />
 			<p class="text-stage-sm text-cream/70">
 				<span class="font-display text-stage-md font-semibold text-cream tabular">{Math.round(count.current)}</span>
@@ -80,7 +80,7 @@
 		</div>
 
 		{#if !participants.length}
-			<div class="flex flex-1 items-center justify-center gap-3 text-stage-sm text-cream/50" in:rise={{ y: 8, duration: DUR.stage, delay: 600 }}>
+			<div class="flex flex-1 items-center justify-center gap-3 text-stage-sm text-cream/65" in:rise={{ y: 8, duration: DUR.stage, delay: 600 }}>
 				<span class="flex gap-1.5" aria-hidden="true">
 					{#each [0, 1, 2] as i (i)}
 						<span class="size-2 animate-pulse-dot rounded-full bg-green-300" style:animation-delay="{i * 200}ms"></span>
@@ -91,7 +91,7 @@
 		{:else}
 			<ul class="mt-[2vh] flex flex-wrap content-start gap-3 overflow-hidden">
 				{#if hiddenCount}
-					<li class="flex h-[clamp(2.25rem,3.4vw,3.25rem)] items-center rounded-full px-5 text-stage-sm text-cream/60 tabular ring-1 ring-stage-line">
+					<li class="flex h-[clamp(2.25rem,3.4vw,3.25rem)] items-center rounded-full bg-stage-raised px-5 text-stage-sm text-cream/70 tabular ring-1 ring-stage-line">
 						+{hiddenCount} more
 					</li>
 				{/if}

@@ -69,7 +69,7 @@
 			<button
 				type="button"
 				onclick={() => (dismissed = true)}
-				class="grid size-9 place-items-center rounded-full text-cream/60 transition-colors duration-150 hover:bg-white/5 hover:text-cream"
+				class="grid size-9 place-items-center rounded-full text-cream/60 transition-colors duration-150 hover:bg-cream/5 hover:text-cream"
 				aria-label="Stay windowed"
 				title="Stay windowed"
 			>
@@ -93,10 +93,10 @@
 	aria-label="Presenter controls"
 	tabindex="-1"
 >
-	<div class="flex h-14 w-full max-w-5xl items-center gap-2 rounded-lg bg-stage-raised/90 px-2 text-cream ring-1 ring-stage-line backdrop-blur-md">
+	<div class="flex h-14 w-full max-w-5xl items-center gap-2 rounded-lg bg-stage-raised/90 px-2 text-cream shadow-lg ring-1 ring-stage-line backdrop-blur-md">
 		<a
 			href={backHref}
-			class="inline-flex h-10 items-center gap-2 rounded-md px-3 text-sm text-cream/70 transition-colors duration-150 hover:bg-white/5 hover:text-cream"
+			class="inline-flex h-10 items-center gap-2 rounded-md px-3 text-sm text-cream/70 transition-colors duration-150 hover:bg-cream/5 hover:text-cream"
 		>
 			<ArrowLeft class="size-4" /> <span class="hidden max-w-48 truncate md:inline">{title}</span><span class="md:hidden">Back</span>
 		</a>
@@ -105,7 +105,7 @@
 		<button
 			type="button"
 			onclick={toggleFullscreen}
-			class="grid size-10 place-items-center rounded-md text-cream/70 transition-colors duration-150 hover:bg-white/5 hover:text-cream"
+			class="grid size-10 place-items-center rounded-md text-cream/70 transition-colors duration-150 hover:bg-cream/5 hover:text-cream"
 			aria-label={fullscreen ? 'Exit fullscreen (F)' : 'Fullscreen (F)'}
 			title={fullscreen ? 'Exit fullscreen (F)' : 'Fullscreen (F)'}
 		>

@@ -34,8 +34,8 @@
 			class="relative grid min-h-[clamp(3.5rem,11vh,7rem)] grid-cols-[auto_1fr_auto] items-center gap-[1.2vw] overflow-hidden rounded-xl bg-stage-raised/85 px-[1.2vw] ring-1 transition-[opacity,transform,filter,box-shadow] duration-700 ease-out-quart
 				{isCorrect ? 'shimmer scale-[1.02] ring-2 ring-correct-stage' : 'ring-stage-line'}
 				{twoCols && options.length % 2 && i === options.length - 1 ? 'col-span-2' : ''}"
-			style:opacity={dim ? 0.38 : 1}
-			style:filter={dim ? 'saturate(0.3)' : 'none'}
+			style:opacity={dim ? 0.6 : 1}
+			style:filter={dim ? 'saturate(0.45)' : 'none'}
 			style:box-shadow={isCorrect ? '0 0 50px -10px var(--color-correct-stage)' : 'none'}
 			in:rise={{ y: 26, duration: 760, delay: 100 + i * 90 }}
 		>

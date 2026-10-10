@@ -1,6 +1,6 @@
 import { error, type RequestEvent } from '@sveltejs/kit';
 import { getAuth } from 'firebase-admin/auth';
-import { ADMIN_EMAIL } from '$lib/config/admin';
+import { env } from '$env/dynamic/private';
 import { adminApp, adminDb, hasAdminCredentials } from '$lib/server/firebase-admin';
 
 export interface AdminIdentity {
@@ -21,7 +21,7 @@ export async function verifyAdminToken(token: string): Promise<AdminIdentity | n
 		return null;
 	}
 	const identity = { uid: decoded.uid, email: decoded.email ?? null };
-	if (decoded.email?.toLowerCase() === ADMIN_EMAIL && decoded.firebase?.sign_in_provider === 'password') {
+	if (decoded.email?.toLowerCase() === (env.ADMIN_EMAIL ?? '').trim().toLowerCase() && decoded.firebase?.sign_in_provider === 'password') {
 		return identity;
 	}
 	if (!hasAdminCredentials()) return null;

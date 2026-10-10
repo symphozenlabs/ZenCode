@@ -16,7 +16,7 @@
 	});
 </script>
 
-<div class="flex h-full flex-col">
+<div class="stage-panel flex h-full flex-col rounded-2xl pb-[2vh]">
 	<ul class="relative flex min-h-0 flex-1 items-end justify-center gap-[2.5vw] border-b-2 border-stage-line px-[2vw] pt-[9vh]" aria-label="Results">
 		{#each options as o, i (o.id)}
 			{@const count = counts[o.id] ?? 0}

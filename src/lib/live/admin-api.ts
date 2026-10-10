@@ -1,4 +1,4 @@
-import { auth } from '$lib/firebase/client';
+import { auth } from '$lib/firebase/auth';
 
 export class ApiError extends Error {
 	constructor(

@@ -11,7 +11,7 @@
 	const max = $derived(Math.max(0, ...options.map((o) => counts[o.id] ?? 0)));
 </script>
 
-<div class="flex h-full flex-col justify-center gap-[5vh]">
+<div class="stage-panel flex h-full flex-col justify-center gap-[5vh] rounded-2xl py-[3vh]">
 	<ul class="flex items-end justify-center gap-[6vw]" aria-label="Results">
 		{#each options as o, i (o.id)}
 			{@const count = counts[o.id] ?? 0}

@@ -37,7 +37,7 @@
 					style:--tw-ring-color={isCorrect ? color : 'var(--color-stage-line)'}
 					style:--shake-delay="{i * 140}ms"
 					style:transform={isWrong ? 'rotate(-2deg) scale(0.94)' : isCorrect ? 'scale(1.03)' : 'none'}
-					style:opacity={isWrong ? 0.4 : 1}
+					style:opacity={isWrong ? 0.6 : 1}
 					style:filter={isWrong ? 'grayscale(0.8)' : 'none'}
 					style:box-shadow={isCorrect ? `0 0 80px -10px ${color}` : 'none'}
 				>
@@ -73,7 +73,7 @@
 			</li>
 		{/each}
 	</ul>
-	<p class="mt-[4vh] h-[1.5em] font-mono text-stage-sm tracking-[0.3em] text-sun uppercase transition-opacity duration-500" style:opacity={drumroll ? 1 : 0}>
+	<p class="stage-panel mt-[4vh] rounded-full px-[1.5vw] py-[0.8vh] font-mono text-stage-sm tracking-[0.3em] text-sun uppercase transition-opacity duration-500" style:opacity={drumroll ? 1 : 0}>
 		Drumroll…
 	</p>
 </div>

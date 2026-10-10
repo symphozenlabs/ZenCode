@@ -1,7 +1,8 @@
 <script lang="ts">
 	import type { Slide } from '$lib/live/types';
 	import { SLIDE_META } from '$lib/live/slides';
-	import { burst, rise } from '$lib/live/motion';
+	import { burst, reduced, rise } from '$lib/live/motion';
+	import { splitReveal, useGsap } from '$lib/live/gsap';
 	import { SLIDE_ACCENT, SLIDE_ICONS } from './slide-icons';
 
 	/**
@@ -15,6 +16,13 @@
 	const Icon = $derived(SLIDE_ICONS[slide.kind]);
 	const accent = $derived(SLIDE_ACCENT[slide.kind]);
 	const num = $derived(String(index + 1).padStart(2, '0'));
+
+	/** The ghost number swings in from deep behind the stage once the curtain lifts. */
+	function ghostIn(node: HTMLElement) {
+		if (reduced()) return;
+		const t = useGsap().from(node, { scale: 1.8, rotationY: -55, opacity: 0, filter: 'blur(18px)', duration: 1.6, delay: 0.45, ease: 'expo.out', transformPerspective: 1200 });
+		return { destroy: () => void t.kill() };
+	}
 </script>
 
 <div class="relative grid h-full place-items-center overflow-hidden" style:--accent={accent}>
@@ -22,7 +30,7 @@
 	<p
 		class="pointer-events-none absolute font-display text-[clamp(10rem,32vw,30rem)] leading-none font-bold tracking-tighter text-transparent tabular select-none"
 		style="-webkit-text-stroke: 2px color-mix(in srgb, var(--accent) 28%, transparent)"
-		in:rise={{ y: 60, duration: 1100 }}
+		use:ghostIn
 		aria-hidden="true"
 	>
 		{num}
@@ -44,9 +52,11 @@
 		<p class="mt-[3vh] font-mono text-stage-sm tracking-[0.3em] uppercase" style:color="var(--accent)" in:rise={{ y: 14, duration: 700, delay: 260 }}>
 			{meta.scored ? 'Quiz' : 'Question'} {index + 1} / {total}
 		</p>
-		<p class="mt-[1.2vh] font-display text-stage-xl font-semibold tracking-tight text-cream" in:rise={{ y: 30, duration: 900, delay: 340 }}>
-			{meta.label}
-		</p>
+		<p
+			class="mt-[1.2vh] font-display text-stage-xl font-semibold tracking-tight text-cream [perspective:800px]"
+			aria-label={meta.label}
+			use:splitReveal={{ text: meta.label, by: 'chars', delay: 650 }}
+		></p>
 		<p class="mt-[1.6vh] text-stage-md text-cream/60" in:rise={{ y: 14, duration: 700, delay: 480 }}>
 			{meta.description}
 		</p>

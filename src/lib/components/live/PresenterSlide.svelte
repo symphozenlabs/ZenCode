@@ -9,6 +9,7 @@
 	import CountdownRing from './CountdownRing.svelte';
 	import Confetti from './Confetti.svelte';
 	import SlideIntro from './SlideIntro.svelte';
+	import { splitReveal } from '$lib/live/gsap';
 	import ResultBars from './results/ResultBars.svelte';
 	import ResultColumns from './results/ResultColumns.svelte';
 	import ResultSplit from './results/ResultSplit.svelte';
@@ -50,7 +51,16 @@
 	);
 	$effect(() => {
 		if (!intro) return;
-		const t = setTimeout(() => (intro = false), meta.scored ? 2300 : 1900);
+		const t = setTimeout(() => (intro = false), meta.scored ? 2800 : 2400); // includes the curtain wipe
+		return () => clearTimeout(t);
+	});
+
+	// ---- Timer starts by itself -----------------------------------------------------
+	// Once the title card is gone and the question has landed, open responses —
+	// moving to a timed slide is enough, no extra "Start timer" press.
+	$effect(() => {
+		if (intro || !timed || run.phase !== 'ready') return;
+		const t = setTimeout(() => room.act({ t: 'start_timer' }), reduced() ? 200 : 1100);
 		return () => clearTimeout(t);
 	});
 
@@ -116,9 +126,11 @@
 							<span class="font-mono text-stage-xs tracking-[0.16em] text-cream/70 uppercase" in:rise={{ y: 6, duration: DUR.layout }}>· {status}</span>
 						{/key}
 					</div>
-					<h1 class="mt-[1.6vh] max-w-[38ch] font-display text-stage-lg font-semibold text-balance text-cream" in:rise={{ y: 24, duration: 900, delay: 260 }}>
-						{slide.question || 'Audience Q&A'}
-					</h1>
+					<h1
+						class="mt-[1.6vh] max-w-[38ch] font-display text-stage-lg font-semibold text-balance text-cream [perspective:800px]"
+						aria-label={slide.question || 'Audience Q&A'}
+						use:splitReveal={{ text: slide.question || 'Audience Q&A', delay: 250 }}
+					></h1>
 				</div>
 				{#if timed}
 					<div in:pop={{ duration: DUR.stage, delay: 400, from: 0.5 }}>
@@ -170,8 +182,8 @@
 
 			<!-- Who has answered -->
 			{#if meta.input !== 'none'}
-				<div class="mt-[3vh] flex items-center gap-[1.5vw]" aria-live="off" in:rise={{ y: 10, delay: 500 }}>
-					<p class="text-stage-sm text-cream/70 tabular">
+				<div class="stage-panel mt-[2vh] flex items-center gap-[1.5vw] rounded-full px-[1.5vw] py-[1vh]" aria-live="off" in:rise={{ y: 10, delay: 500 }}>
+					<p class="text-stage-sm text-cream/80 tabular">
 						<span class="font-display font-semibold text-cream">{Math.round(answered.current)}</span> of {room.eligible} answered
 					</p>
 					<div class="relative h-2 flex-1 overflow-hidden rounded-full bg-stage-line">
