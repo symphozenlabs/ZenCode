@@ -34,7 +34,7 @@ On Vercel, set the same variables in the project settings.
 
 Live sessions need a long-running server (WebSockets plus in-memory rooms), which Vercel can't host. Run `server.js` on a Node host (Render, Railway, Fly, a VM) and point the Vercel site at it:
 
-1. **Live server** — build `npm ci && npm run build`, start `npm start` (Node 22.9+ for `--env-file-if-exists`; listens on `PORT`). Give it the same env vars as Vercel, plus `LIVE_ALLOWED_ORIGINS=https://<your-vercel-domain>` (comma-separated if several).
+1. **Live server** — on Render, use the Blueprint in `render.yaml` (New → Blueprint → this repo; paste the secret values it asks for). Elsewhere: build `npm ci && npm run build`, start `npm start` (Node 22.9+ for `--env-file-if-exists`; listens on `PORT`). Give it the same env vars as Vercel, plus `LIVE_ALLOWED_ORIGINS=https://<your-vercel-domain>` (comma-separated if several).
 2. **Vercel** — add `VITE_LIVE_ORIGIN=https://<live-server-domain>` and redeploy. The presenter, admin live pages and `/play` phones then talk to the live server.
 
 Without `VITE_LIVE_ORIGIN` everything stays on the same host, which is what `npm run dev` and a plain `npm start` deployment use.
