@@ -4,8 +4,14 @@ import { liveHub } from '$lib/server/live';
 
 // Create the live-session hub at startup so server.js can route WebSocket
 // upgrades to it (it reads globalThis.__zencodeLive).
+// A broken live setup (e.g. bad Firebase Admin credentials) must not take the
+// whole site down: log it, and let the /api/live routes report their own errors.
 export const init: ServerInit = () => {
-	liveHub();
+	try {
+		liveHub();
+	} catch (err) {
+		console.error('[live] could not start the live hub', err);
+	}
 };
 
 // The admin area lives at /admin. Section-prefixed URLs such as
