@@ -48,7 +48,19 @@ function fromDoc(id: string, event: EventId, d: DocumentData): Registration {
 		members,
 		status,
 		createdAt: toMillis(d.registeredAt),
-		reviewedBy: typeof d.reviewedBy === 'string' ? d.reviewedBy : null
+		reviewedBy: typeof d.reviewedBy === 'string' ? d.reviewedBy : null,
+		emailDelivery: Array.isArray(d.emailDelivery)
+			? d.emailDelivery
+					.filter((e: DocumentData) => typeof e?.email === 'string')
+					.map((e: DocumentData) => ({
+						email: e.email,
+						status: e.status === 'sent' ? 'sent' : 'failed',
+						resendId: str(e.resendId) || null,
+						error: str(e.error) || null,
+						sendCount: typeof e.sendCount === 'number' ? e.sendCount : 1,
+						lastAttemptAt: typeof e.lastAttemptAt === 'number' ? e.lastAttemptAt : 0
+					}))
+			: []
 	};
 }
 

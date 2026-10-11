@@ -28,9 +28,14 @@
     return { key: nextKey++, name: '', admissionNumber: '', email: '', mobile: '', open: true };
   }
 
+  /** The mandatory members, with only the team leader's card open. */
+  function initialMembers() {
+    return Array.from({ length: minMembers }, (_, i) => ({ ...emptyMember(), open: i === 0 }));
+  }
+
   // Member 1 is always the team leader; the form starts with the mandatory members.
   // svelte-ignore state_referenced_locally
-  let members = $state(Array.from({ length: minMembers }, emptyMember));
+  let members = $state(initialMembers());
 
   let teamName = $state('');
   let teamNameError = $state('');
@@ -273,7 +278,7 @@
   }
 
   function handleReset() {
-    members = Array.from({ length: minMembers }, emptyMember);
+    members = initialMembers();
     teamName = '';
     teamNameError = '';
     fieldErrors = [];
