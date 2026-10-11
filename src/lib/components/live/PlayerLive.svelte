@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Tween } from 'svelte/motion';
 	import { cubicOut } from 'svelte/easing';
-	import { Check, X, Timer, Trophy, Monitor, CircleCheckBig } from '@lucide/svelte';
+	import { Check, X, Timer, Trophy, Monitor, CircleCheckBig, ListOrdered } from '@lucide/svelte';
 	import type { PlayerRoom } from '$lib/live/player.svelte';
 	import { DUR, pop, reduced, rise, softFade } from '$lib/live/motion';
 	import CountdownRing from './CountdownRing.svelte';
@@ -10,6 +10,7 @@
 	import NumberInput from './inputs/NumberInput.svelte';
 	import OrderInput from './inputs/OrderInput.svelte';
 	import Confetti from './Confetti.svelte';
+	import PlayerBoardSheet from './PlayerBoardSheet.svelte';
 	import { SLIDE_META } from '$lib/live/slides';
 	import { SLIDE_ACCENT, SLIDE_ICONS } from './slide-icons';
 
@@ -45,6 +46,9 @@
 		}
 		points.set(target, { duration: reduced() ? 0 : 900, delay: 250 });
 	});
+
+	let boardOpen = $state(false);
+	const me = $derived(room.state?.me);
 
 	const ordinal = (n: number) => {
 		const v = n % 100;
@@ -97,6 +101,15 @@
 							</p>
 						{:else}
 							<p class="mt-5 text-xl font-semibold text-forest-950">Leaderboard on the big screen</p>
+						{/if}
+						{#if s.board?.length}
+							<button
+								type="button"
+								class="mt-7 inline-flex h-11 items-center gap-2 rounded-full bg-card px-5 text-[15px] font-semibold text-forest-950 shadow-sm ring-1 ring-border transition-[background-color,transform] duration-150 hover:bg-secondary active:scale-[0.97]"
+								onclick={() => (boardOpen = true)}
+							>
+								<ListOrdered class="size-4 text-forest-700" aria-hidden="true" /> See leaderboard
+							</button>
 						{/if}
 					</div>
 				{:else if screen === 'ready'}
@@ -185,3 +198,14 @@
 
 	<p class="mt-3 min-h-5 text-center text-sm text-destructive" aria-live="assertive">{room.answerError}</p>
 </div>
+
+{#if s.board && me}
+	<PlayerBoardSheet
+		open={boardOpen && screen === 'leaderboard'}
+		onclose={() => (boardOpen = false)}
+		board={s.board}
+		meId={me.id}
+		me={s.standing ? { id: me.id, nickname: me.nickname, avatar: me.avatar, score: s.standing.score, rank: s.standing.rank } : null}
+		players={s.standing?.players ?? room.state?.playerCount ?? s.board.length}
+	/>
+{/if}
