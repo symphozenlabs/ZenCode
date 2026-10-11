@@ -237,6 +237,39 @@ it('ignores malformed frames without dropping the connection', async () => {
 	expect(c.ws.readyState).toBe(WebSocket.OPEN);
 });
 
+describe('reactions', () => {
+	it('batches phone reactions to the host', async () => {
+		const { c: h, code } = await host();
+		const a = await player(code, 'Ada');
+		const b = await player(code, 'Bob');
+		const batch = h.next('reactions');
+		a.c.send({ t: 'react', reaction: 'heart' });
+		a.c.send({ t: 'react', reaction: 'fire' });
+		b.c.send({ t: 'react', reaction: 'heart' });
+		expect((await batch).counts).toEqual({ heart: 2, fire: 1 });
+	});
+
+	it('drops unknown reactions, host reactions and reactions over the rate limit', async () => {
+		const { c: h, code } = await host();
+		const a = await player(code, 'Ada');
+		h.send({ t: 'react', reaction: 'heart' });
+		a.c.send({ t: 'react', reaction: 'poop' } as unknown as ClientMessage);
+		for (let i = 0; i < 20; i++) a.c.send({ t: 'react', reaction: 'clap' });
+		expect((await h.next('reactions')).counts).toEqual({ clap: 8 });
+		expect(a.c.messages.some((m) => m.t === 'error')).toBe(false);
+	});
+
+	it('ignores reactions when the session turns them off', async () => {
+		await repo.putSession(session({ settings: { ...DEFAULT_SETTINGS, reactions: false } }));
+		const { c: h, code } = await host();
+		const a = await player(code, 'Ada');
+		expect(a.welcome.state.settings.reactions).toBe(false);
+		a.c.send({ t: 'react', reaction: 'heart' });
+		await new Promise((r) => setTimeout(r, 250));
+		expect(h.messages.some((m) => m.t === 'reactions')).toBe(false);
+	});
+});
+
 // ---------------------------------------------------------------------------
 // Phase 2: running slides
 // ---------------------------------------------------------------------------

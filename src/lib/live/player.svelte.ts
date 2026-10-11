@@ -1,4 +1,5 @@
 import type { ClientMessage, ErrorCode, PlayerSlideState, PlayerSnapshot, ServerMessage } from './protocol';
+import type { ReactionId } from './reactions';
 import { LiveSocket } from './socket.svelte';
 import type { ResponseValue } from './types';
 
@@ -75,6 +76,11 @@ export class PlayerRoom {
 			this.pending = null;
 			this.answerError = 'You’re offline — reconnecting. Try again in a moment.';
 		}
+	}
+
+	/** Returns false while offline so the phone can skip its local flourish. */
+	react(reaction: ReactionId) {
+		return this.socket.send({ t: 'react', reaction });
 	}
 
 	#setSlide(s: PlayerSlideState | null) {

@@ -3,6 +3,7 @@ import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { isAvatar } from '$lib/live/avatars';
+import { isReaction } from '$lib/live/reactions';
 import { SOCKET_PATH, type ClientMessage, type ErrorCode, type HostAction, type ServerMessage } from '$lib/live/protocol';
 import { cleanNickname, JOIN_CODE_RE, nicknameError } from '$lib/live/session';
 import type { LiveSession, StoredParticipant } from '$lib/live/types';
@@ -22,6 +23,7 @@ const MAX_PLAYERS = 500;
 const HEARTBEAT_MS = 15_000;
 const MSGS_PER_SECOND = 30;
 const JOINS_PER_SOCKET = 6;
+const REACTIONS_PER_SECOND = 8;
 
 const HOST_ACTIONS = new Set<string>([
 	'start_session',
@@ -213,6 +215,7 @@ export class LiveHub {
 			room: null,
 			participantId: null,
 			window: { start: Date.now(), count: 0 },
+			reactWindow: { start: Date.now(), count: 0 },
 			joinAttempts: 0
 		};
 		this.#clients.set(ws, client);
@@ -273,6 +276,15 @@ export class LiveHub {
 				const result = c.room.submit(c.participantId, msg.slideId, msg.value);
 				if (result.ok) sendMsg(c, { t: 'response_ack', slideId: msg.slideId });
 				else fail(c, 'response_rejected', result.message, typeof msg.slideId === 'string' ? msg.slideId : undefined);
+				return;
+			}
+			case 'react': {
+				// Fire-and-forget: extra or disallowed taps are dropped silently.
+				const room = c.room;
+				if (c.role !== 'player' || !room?.open || !room.session.settings.reactions || !isReaction(msg.reaction)) return;
+				const now = Date.now();
+				if (now - c.reactWindow.start >= 1000) c.reactWindow = { start: now, count: 0 };
+				if (++c.reactWindow.count <= REACTIONS_PER_SECOND) room.react(msg.reaction);
 				return;
 			}
 			default:

@@ -15,6 +15,7 @@
 	import AvatarPicker from '$lib/components/live/AvatarPicker.svelte';
 	import ReconnectBanner from '$lib/components/live/ReconnectBanner.svelte';
 	import PlayerLive from '$lib/components/live/PlayerLive.svelte';
+	import ReactionDock from '$lib/components/live/ReactionDock.svelte';
 	import { SLIDE_ACCENT } from '$lib/components/live/slide-icons';
 
 	const code = page.params.code!;
@@ -65,6 +66,7 @@
 	}
 
 	const me = $derived(room.state?.me);
+	const reacting = $derived(room.phase === 'ready' && !!me && !!room.state?.settings.reactions);
 	// Same mood as the big screen: the wash takes the current slide kind's colour.
 	const accent = $derived(room.slide?.slide ? SLIDE_ACCENT[room.slide.slide.kind] : 'var(--color-sun)');
 </script>
@@ -89,7 +91,12 @@
 		</span>
 	</header>
 
-	<main class="mx-auto flex w-full max-w-md flex-1 flex-col px-4 pt-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+	<!-- With reactions on, leave room for the dock along the bottom -->
+	<main
+		class="mx-auto flex w-full max-w-md flex-1 flex-col px-4 pt-6 {reacting
+			? 'pb-[calc(max(0.75rem,env(safe-area-inset-bottom))+5rem)]'
+			: 'pb-[max(1.5rem,env(safe-area-inset-bottom))]'}"
+	>
 		{#if room.phase === 'missing'}
 			<div class="my-auto text-center" in:rise>
 				<div class="mx-auto grid size-12 place-items-center rounded-lg bg-secondary text-secondary-foreground"><SearchX class="size-5" /></div>
@@ -174,4 +181,8 @@
 			</div>
 		{/if}
 	</main>
+
+	{#if reacting}
+		<ReactionDock onreact={(id) => room.react(id)} />
+	{/if}
 </div>
