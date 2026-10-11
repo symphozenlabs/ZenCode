@@ -11,6 +11,7 @@ import type {
 	StoredParticipant,
 	StoredResponse
 } from '$lib/live/types';
+import type { ReactionId } from '$lib/live/reactions';
 import { buildLeaderboard } from './ranking';
 import type { LiveRepo } from './repo';
 import { tally, validateResponse } from './responses';
@@ -33,6 +34,8 @@ export interface Client {
 	room: Room | null;
 	participantId: string | null;
 	window: { start: number; count: number };
+	/** Separate, tighter budget for emoji reactions. */
+	reactWindow: { start: number; count: number };
 	joinAttempts: number;
 }
 
@@ -57,6 +60,7 @@ export class Room {
 	responses = new Map<string, Map<string, StoredResponse>>();
 
 	#dirty = { lobby: false, count: false, results: false };
+	#reactions = new Map<ReactionId, number>();
 	#flushTimer: ReturnType<typeof setTimeout> | null = null;
 	#closeTimer: ReturnType<typeof setTimeout> | null = null;
 	#tickTimer: ReturnType<typeof setInterval> | null = null;
@@ -182,6 +186,11 @@ export class Room {
 		this.#dirty.results = true;
 		this.#schedule();
 	}
+	/** Batched with the other fan-out so a burst from 500 phones is a few frames. */
+	react(id: ReactionId) {
+		this.#reactions.set(id, (this.#reactions.get(id) ?? 0) + 1);
+		this.#schedule();
+	}
 	#schedule() {
 		this.#flushTimer ??= setTimeout(() => this.flush(), BROADCAST_MS);
 	}
@@ -190,6 +199,10 @@ export class Room {
 		this.#flushTimer = null;
 		const d = this.#dirty;
 		this.#dirty = { lobby: false, count: false, results: false };
+		if (this.#reactions.size) {
+			this.toHosts({ t: 'reactions', counts: Object.fromEntries(this.#reactions) });
+			this.#reactions.clear();
+		}
 		if (d.lobby) {
 			this.toHosts({ t: 'lobby_update', participants: this.publicParticipants() });
 			this.toPlayers({ t: 'player_count', count: this.participants.size });

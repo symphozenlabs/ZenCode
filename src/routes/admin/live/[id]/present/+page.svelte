@@ -36,6 +36,8 @@
 	import JoinChip from '$lib/components/live/JoinChip.svelte';
 	import ReconnectBanner from '$lib/components/live/ReconnectBanner.svelte';
 	import StageBackdrop from '$lib/components/live/StageBackdrop.svelte';
+	import ReactionFlight from '$lib/components/live/ReactionFlight.svelte';
+	import { REACTIONS, reactionEmoji } from '$lib/live/reactions';
 
 	const sessionId = page.params.id!;
 	const room = new HostRoom(sessionId);
@@ -103,6 +105,18 @@
 		if (key === 'l') return handled(toggleLeaderboard);
 		if (key === 'h') return handled(toggleResults);
 	}
+
+	// Phone reactions float up the right side of the stage. A batch arrives every
+	// ~100ms; spread its emoji over that window so bursts stream, not clump.
+	let flight = $state<ReactionFlight>();
+	$effect(() =>
+		room.onReactions((counts) => {
+			for (const { id } of REACTIONS) {
+				const n = Math.min(counts[id] ?? 0, 12);
+				for (let i = 0; i < n; i++) flight?.launch(reactionEmoji(id), undefined, Math.random() * 300);
+			}
+		})
+	);
 
 	// Refused actions (e.g. "Slide 3 isn't finished") as a short toast
 	let toast = $state<string | null>(null);
@@ -221,6 +235,8 @@
 			{/key}
 		</div>
 	</main>
+
+	<ReactionFlight bind:this={flight} size={72} class="z-20" />
 
 	<!-- Refused-action toast -->
 	<div class="pointer-events-none fixed inset-x-0 top-16 z-50 flex justify-center" aria-live="polite">

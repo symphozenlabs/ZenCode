@@ -6,6 +6,7 @@
  * Timestamps (`endsAt`, `serverNow`) are server clock; clients only use them
  * to draw the countdown. Correct answers reach phones only after a reveal.
  */
+import type { ReactionId } from './reactions';
 import type { PublicSlide } from './slides';
 import type {
 	LeaderboardEntry,
@@ -43,6 +44,7 @@ export type ClientMessage =
 	| { t: 'join'; code: string; nickname: string; avatar: string }
 	| { t: 'resume'; code: string; participantId: string; secret: string }
 	| { t: 'submit_response'; slideId: string; value: ResponseValue }
+	| { t: 'react'; reaction: ReactionId }
 	| HostAction;
 
 // ---- Server → client ------------------------------------------------------
@@ -102,6 +104,8 @@ export type ServerMessage =
 	| { t: 'answer_reveal'; slideId: string; correctIds: string[] }
 	| { t: 'leaderboard_update'; entries: LeaderboardEntry[] }
 	| { t: 'response_ack'; slideId: string }
+	/** Host: reactions tapped on phones since the last batch (~100ms). */
+	| { t: 'reactions'; counts: Partial<Record<ReactionId, number>> }
 	| { t: 'session_ended' }
 	| { t: 'error'; code: ErrorCode; message: string; slideId?: string };
 

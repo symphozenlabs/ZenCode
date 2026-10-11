@@ -1,5 +1,6 @@
 import type { ErrorCode, HostAction, ServerMessage } from './protocol';
 import { idToken } from './admin-api';
+import type { ReactionId } from './reactions';
 import { LiveSocket } from './socket.svelte';
 import type { LeaderboardEntry, LiveSession, PublicParticipant, SlideResults } from './types';
 
@@ -17,6 +18,7 @@ export class HostRoom {
 	/** Non-fatal action errors (e.g. "Slide 3 isn't finished") — shown as a toast. */
 	notice = $state<{ id: number; message: string } | null>(null);
 	readonly socket: LiveSocket;
+	#reactionListeners = new Set<(counts: Partial<Record<ReactionId, number>>) => void>();
 
 	connectedCount = $derived(this.participants.filter((p) => p.connected).length);
 	live = $derived(this.session?.status === 'live' ? (this.session.live ?? null) : null);
@@ -79,6 +81,9 @@ export class HostRoom {
 			case 'leaderboard_update':
 				this.leaderboard = m.entries;
 				break;
+			case 'reactions':
+				for (const fn of this.#reactionListeners) fn(m.counts);
+				break;
 			case 'timer_tick':
 				this.#sync(m.serverNow);
 				break;
@@ -91,6 +96,12 @@ export class HostRoom {
 				}
 				break;
 		}
+	}
+
+	/** Reactions are events, not state: the big screen animates and forgets them. */
+	onReactions(fn: (counts: Partial<Record<ReactionId, number>>) => void) {
+		this.#reactionListeners.add(fn);
+		return () => void this.#reactionListeners.delete(fn);
 	}
 
 	act = (action: HostAction) => this.socket.send(action);
