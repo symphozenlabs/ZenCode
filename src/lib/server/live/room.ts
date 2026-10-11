@@ -1,5 +1,5 @@
 import type { WebSocket } from 'ws';
-import type { HostSlideData, HostSnapshot, PlayerSlideState, ServerMessage } from '$lib/live/protocol';
+import type { BoardRow, HostSlideData, HostSnapshot, PlayerSlideState, ServerMessage } from '$lib/live/protocol';
 import { correctIds, hasAnswer, publicSlide, SLIDE_META, slideIssues } from '$lib/live/slides';
 import type {
 	LeaderboardEntry,
@@ -41,6 +41,13 @@ export interface Client {
 
 const BROADCAST_MS = 100; // fan-out at most ~10 times per second
 const TICK_MS = 1000;
+const BOARD_ROWS = 10; // phones get the top 10; each already knows its own place
+
+/** Ranks and the board, computed once per fan-out instead of once per phone. */
+interface Standings {
+	ranks: Map<string, number>;
+	board: BoardRow[];
+}
 
 export function send(c: Client, data: string) {
 	if (c.ws.readyState === c.ws.OPEN) c.ws.send(data);
@@ -126,7 +133,15 @@ export class Room {
 		};
 	}
 
-	playerState(pid: string, ranks?: Map<string, number>): PlayerSlideState | null {
+	standings(): Standings {
+		const entries = this.leaderboard();
+		return {
+			ranks: new Map(entries.map((e) => [e.id, e.rank])),
+			board: entries.slice(0, BOARD_ROWS).map(({ id, nickname, avatar, score, rank }) => ({ id, nickname, avatar, score, rank }))
+		};
+	}
+
+	playerState(pid: string, standings?: Standings): PlayerSlideState | null {
 		const live = this.live;
 		const slide = this.current;
 		const run = this.currentRun;
@@ -135,7 +150,8 @@ export class Room {
 		const me = this.participants.get(pid);
 		const scoredSoFar = !!live.lastRevealed || Object.values(live.runs).some((r) => r.revealed);
 		const showStanding = me && scoredSoFar && (run.revealed || live.view === 'leaderboard');
-		if (showStanding && !ranks) ranks = new Map(this.leaderboard().map((e) => [e.id, e.rank]));
+		const onBoard = live.view === 'leaderboard';
+		if ((showStanding || onBoard) && !standings) standings = this.standings();
 		return {
 			index: live.index,
 			total: this.session.slides.length,
@@ -146,7 +162,8 @@ export class Room {
 			serverNow: Date.now(),
 			answered: mine?.value ?? null,
 			reveal: run.revealed ? { correctIds: correctIds(slide), correct: mine?.correct ?? null, points: mine?.points ?? 0 } : null,
-			standing: showStanding ? { score: me.score, rank: ranks!.get(pid) ?? this.participants.size, players: this.participants.size } : null
+			standing: showStanding ? { score: me.score, rank: standings!.ranks.get(pid) ?? this.participants.size, players: this.participants.size } : null,
+			board: onBoard ? standings!.board : null
 		};
 	}
 
@@ -169,9 +186,9 @@ export class Room {
 
 	/** Each phone gets its own view (its answer, its result, its rank). */
 	sendPlayerStates() {
-		const ranks = new Map(this.leaderboard().map((e) => [e.id, e.rank]));
+		const standings = this.standings();
 		for (const pid of this.players.keys()) {
-			const state = this.playerState(pid, ranks);
+			const state = this.playerState(pid, standings);
 			if (state) this.toPlayer(pid, { t: 'player_state', state });
 		}
 	}

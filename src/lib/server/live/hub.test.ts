@@ -461,6 +461,15 @@ describe('running a quiz slide', () => {
 		expect(entries.filter((e) => e.score === 1000)).toHaveLength(25);
 		expect(entries.filter((e) => e.rank === 1)).toHaveLength(25); // shared rank
 		expect(entries.filter((e) => e.rank === 26)).toHaveLength(25);
+
+		// Phones get the top 10 only while the big screen shows the leaderboard
+		const shown = players[1].c.next('player_state', (m) => m.state.view === 'leaderboard');
+		h.send({ t: 'show_leaderboard', show: true });
+		const phone = (await shown).state;
+		expect(phone.board).toHaveLength(10);
+		expect(phone.board!.every((r) => r.rank === 1 && r.score === 1000)).toBe(true);
+		expect(phone.board![0]).not.toHaveProperty('secret');
+		expect(phone.standing).toMatchObject({ rank: 26, players: 50 });
 	});
 });
 

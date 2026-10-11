@@ -1,4 +1,4 @@
-import type { ClientMessage, ErrorCode, PlayerSlideState, PlayerSnapshot, ServerMessage } from './protocol';
+import type { BoardRow, ClientMessage, ErrorCode, PlayerSlideState, PlayerSnapshot, ServerMessage } from './protocol';
 import type { ReactionId } from './reactions';
 import { LiveSocket } from './socket.svelte';
 import type { ResponseValue } from './types';
@@ -41,6 +41,8 @@ export class PlayerRoom {
 	pending = $state<{ slideId: string; value: ResponseValue; confirmed: boolean } | null>(null);
 	answerError = $state('');
 	clockOffset = $state(0);
+	/** Last leaderboard the big screen showed; kept so it can be checked after the session ends. */
+	board = $state<BoardRow[] | null>(null);
 	error = $state<{ code: ErrorCode; message: string } | null>(null);
 	readonly socket: LiveSocket;
 	#creds: Creds | null;
@@ -88,6 +90,7 @@ export class PlayerRoom {
 		if (s && !s.answered && this.pending?.confirmed) this.pending = null; // slide was reset
 		if (s?.slide?.id !== this.slide?.slide?.id) this.answerError = '';
 		this.slide = s;
+		if (s?.board) this.board = s.board;
 		if (s) {
 			this.clockOffset = s.serverNow - Date.now();
 			if (this.state) this.state.status = 'live';

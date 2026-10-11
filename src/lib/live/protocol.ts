@@ -63,6 +63,9 @@ export interface HostSnapshot extends HostSlideData {
 	serverNow: number;
 }
 
+/** A leaderboard row as phones see it. */
+export type BoardRow = Pick<LeaderboardEntry, 'id' | 'nickname' | 'avatar' | 'score' | 'rank'>;
+
 /** One phone's view of the current moment. */
 export interface PlayerSlideState {
 	index: number;
@@ -78,6 +81,8 @@ export interface PlayerSlideState {
 	reveal: { correctIds: string[]; correct: boolean | null; points: number } | null;
 	/** Shown after reveals and on the leaderboard. */
 	standing: { score: number; rank: number; players: number } | null;
+	/** The top of the leaderboard, sent only while the big screen shows it. */
+	board: BoardRow[] | null;
 }
 
 export interface PlayerSnapshot {

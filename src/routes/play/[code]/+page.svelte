@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { untrack } from 'svelte';
-	import { Users, SearchX, Flag, ArrowRight } from '@lucide/svelte';
+	import { Users, SearchX, Flag, ArrowRight, ListOrdered } from '@lucide/svelte';
 	import { AVATARS } from '$lib/live/avatars';
 	import { PlayerRoom } from '$lib/live/player.svelte';
 	import { cleanNickname, formatCode, JOIN_CODE_RE, nicknameError } from '$lib/live/session';
@@ -16,6 +16,7 @@
 	import ReconnectBanner from '$lib/components/live/ReconnectBanner.svelte';
 	import PlayerLive from '$lib/components/live/PlayerLive.svelte';
 	import ReactionDock from '$lib/components/live/ReactionDock.svelte';
+	import PlayerBoardSheet from '$lib/components/live/PlayerBoardSheet.svelte';
 	import { SLIDE_ACCENT } from '$lib/components/live/slide-icons';
 
 	const code = page.params.code!;
@@ -66,6 +67,9 @@
 	}
 
 	const me = $derived(room.state?.me);
+	let boardOpen = $state(false);
+	// The final standings the phone saw, so players can still check them after the end.
+	const finalStanding = $derived(room.slide?.standing ?? null);
 	const reacting = $derived(room.phase === 'ready' && !!me && !!room.state?.settings.reactions);
 	// Same mood as the big screen: the wash takes the current slide kind's colour.
 	const accent = $derived(room.slide?.slide ? SLIDE_ACCENT[room.slide.slide.kind] : 'var(--color-sun)');
@@ -109,7 +113,10 @@
 				<div class="mx-auto grid size-12 place-items-center rounded-lg bg-secondary text-secondary-foreground"><Flag class="size-5" /></div>
 				<h1 class="mt-4 text-xl font-semibold text-forest-950">This session has ended</h1>
 				<p class="mt-1 text-[15px] text-muted-foreground">Thanks for playing.</p>
-				<Button href="/join" variant="outline" size="lg" class="mt-8 w-full">Join another session</Button>
+				{#if room.board?.length}
+					<Button size="lg" class="mt-8 w-full" onclick={() => (boardOpen = true)}><ListOrdered class="size-4" /> See final leaderboard</Button>
+				{/if}
+				<Button href="/join" variant="outline" size="lg" class="{room.board?.length ? 'mt-3' : 'mt-8'} w-full">Join another session</Button>
 			</div>
 		{:else if room.phase === 'connecting' || checking}
 			<div class="space-y-4" aria-busy="true" aria-label="Connecting">
@@ -181,6 +188,17 @@
 			</div>
 		{/if}
 	</main>
+
+	{#if room.phase === 'ended' && room.board && me}
+		<PlayerBoardSheet
+			open={boardOpen}
+			onclose={() => (boardOpen = false)}
+			board={room.board}
+			meId={me.id}
+			me={finalStanding ? { id: me.id, nickname: me.nickname, avatar: me.avatar, score: finalStanding.score, rank: finalStanding.rank } : null}
+			players={finalStanding?.players ?? room.state?.playerCount ?? room.board.length}
+		/>
+	{/if}
 
 	{#if reacting}
 		<ReactionDock onreact={(id) => room.react(id)} />
