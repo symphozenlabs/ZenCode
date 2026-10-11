@@ -1,8 +1,6 @@
 import { db, COLLECTIONS } from '../firebase.js';
 import { doc, getDoc } from 'firebase/firestore';
-import { sendTeamConfirmationEmails } from './email.js';
-
-const DEFAULT_PUBLIC_BASE_URL = 'https://zencode.symphozen.com';
+import { sendAndRecord } from './registration-mail.js';
 
 const EVENT_BY_COLLECTION = {
   [COLLECTIONS.HACKATHON]: 'Hackathon',
@@ -21,23 +19,6 @@ function sendJson(res, status, body) {
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json');
   res.end(JSON.stringify(body));
-}
-
-function normalizeBaseUrl(rawUrl) {
-  const trimmed = (rawUrl || '').trim();
-  if (!trimmed) return DEFAULT_PUBLIC_BASE_URL;
-
-  const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
-  return withProtocol.replace(/\/+$/, '');
-}
-
-function getPublicBaseUrl() {
-  return normalizeBaseUrl(
-    process.env.PUBLIC_SITE_URL ||
-    process.env.SITE_URL ||
-    process.env.VITE_PUBLIC_SITE_URL ||
-    DEFAULT_PUBLIC_BASE_URL
-  );
 }
 
 /**
@@ -89,7 +70,6 @@ export async function handleSendConfirmationApi(req, res) {
 
       const resolvedTeamLeader = data.teamLeader;
       const resolvedMembers = Array.isArray(data.members) ? data.members : [];
-      const resolvedTeamName = typeof data.teamName === 'string' ? data.teamName.trim() : '';
 
       // Count valid members
       const validMembersCount = (resolvedMembers.length > 0)
@@ -104,18 +84,8 @@ export async function handleSendConfirmationApi(req, res) {
       console.log(`[REGISTRATION] Database save successful`);
       console.log(`[REGISTRATION] Generating team QR`);
 
-      // Use the canonical public URL so emailed passes never point at localhost or preview hosts.
-      const baseUrl = getPublicBaseUrl();
-
-      // Dispatch team confirmation emails to each valid member
-      const emailOutcome = await sendTeamConfirmationEmails({
-        teamId: teamId,
-        event: eventName,
-        teamName: resolvedTeamName,
-        teamLeader: resolvedTeamLeader,
-        members: resolvedMembers,
-        baseUrl: baseUrl
-      });
+      // Dispatch team confirmation emails to each valid member, and record who got one
+      const emailOutcome = await sendAndRecord(collectionName, eventName, teamId, data);
 
       res.statusCode = emailOutcome.success ? 200 : 500;
       res.setHeader('Content-Type', 'application/json');

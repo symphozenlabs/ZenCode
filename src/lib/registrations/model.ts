@@ -48,6 +48,17 @@ export interface TeamMember {
 	email: string;
 }
 
+/** Server-recorded outcome of the last check-in pass email to one address. */
+export interface EmailDelivery {
+	email: string;
+	status: 'sent' | 'failed';
+	resendId: string | null;
+	error: string | null;
+	sendCount: number;
+	/** ms since epoch */
+	lastAttemptAt: number;
+}
+
 /** Normalised registration as the admin works with it. */
 export interface Registration {
 	/** Firestore document ID */
@@ -64,6 +75,18 @@ export interface Registration {
 	/** ms since epoch */
 	createdAt: number;
 	reviewedBy: string | null;
+	/** Pass emails recorded by the server; empty for teams registered before tracking */
+	emailDelivery: EmailDelivery[];
+}
+
+/** Every address a team's passes go to: the leader plus members, deduplicated (as the server sends). */
+export function passRecipients(r: Pick<Registration, 'teamLeader' | 'members'>) {
+	const seen = new Map<string, string>();
+	for (const p of [r.teamLeader, ...r.members]) {
+		const email = p.email.trim().toLowerCase();
+		if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && !seen.has(email)) seen.set(email, p.name);
+	}
+	return [...seen].map(([email, name]) => ({ email, name }));
 }
 
 /** Team name, falling back to the leader's name for older registrations. */

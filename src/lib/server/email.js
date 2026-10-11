@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { Resend } from 'resend';
+import { read } from '$app/server';
+import hackathonTemplateUrl from "../../assets/ZEN code '26 Hackathon Template.pptx?url";
 import { generateTeamQRCode } from './qr.js';
 import { buildRegistrationPassEmailHtml } from './emailTemplate.js';
 import { buildRegistrationPassPdfBase64 } from './pdfPass.js';
@@ -123,6 +125,75 @@ function getResendErrorMessage(error) {
   return originalMessage;
 }
 
+const HACKATHON_TEMPLATE_NAME = "ZEN code '26 Hackathon Template.pptx";
+
+/** Base64 of the hackathon template, read once per server instance. */
+let hackathonTemplate = null;
+async function getHackathonTemplateBase64() {
+  hackathonTemplate ??= read(hackathonTemplateUrl)
+    .arrayBuffer()
+    .then(buf => Buffer.from(buf).toString('base64'))
+    .catch(err => {
+      hackathonTemplate = null;
+      throw err;
+    });
+  return hackathonTemplate;
+}
+
+/**
+ * Resend allows a couple of requests per second per account. Space sends out
+ * across every registration this instance handles, so a burst of teams
+ * registering at once doesn't get members rate-limited.
+ */
+const MIN_SEND_GAP_MS = 600;
+const MAX_SEND_ATTEMPTS = 4;
+let sendQueue = Promise.resolve();
+let lastSendAt = 0;
+
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+function throttled(fn) {
+  const run = sendQueue.then(async () => {
+    const gap = lastSendAt + MIN_SEND_GAP_MS - Date.now();
+    if (gap > 0) await wait(gap);
+    try {
+      return await fn();
+    } finally {
+      lastSendAt = Date.now();
+    }
+  });
+  sendQueue = run.catch(() => {});
+  return run;
+}
+
+function isRetryable(error) {
+  const status = error?.statusCode || error?.status;
+  const name = error?.name || '';
+  // A daily/monthly quota won't clear by retrying in a few seconds.
+  if (/quota/i.test(name) || /quota/i.test(error?.message || '')) return false;
+  return status === 429 || status >= 500 || name === 'rate_limit_exceeded' || name === 'application_error';
+}
+
+/** Send one email, retrying rate limits and transient failures with backoff. */
+async function sendWithRetry(resend, payload) {
+  let last = null;
+  let attempt = 0;
+  while (attempt < MAX_SEND_ATTEMPTS) {
+    attempt += 1;
+    try {
+      const response = await throttled(() => resend.emails.send(payload));
+      if (!response.error) return { response, attempts: attempt };
+      last = response.error;
+      if (!isRetryable(response.error)) break;
+    } catch (err) {
+      // Network exceptions are worth another try.
+      last = err;
+    }
+    if (attempt < MAX_SEND_ATTEMPTS) await wait(1000 * 2 ** (attempt - 1));
+  }
+  return { response: { data: null, error: last }, attempts: attempt };
+}
+
 function sanitizeAttachmentName(value) {
   return String(value || '')
     .trim()
@@ -167,7 +238,8 @@ function getSanitizedSender(rawSender) {
  * @param {Object} params.teamLeader - Leader details { name, admissionNumber, yearOfStudy, email }
  * @param {Array<Object>} params.members - List of all team members
  * @param {string} [params.baseUrl] - Domain/host origin URL for check-in route
- * @returns {Promise<{ success: boolean, allSuccess: boolean, qrUrl: string, results: Array<Object> }>}
+ * @param {Array<string> | null} [params.onlyEmails] - Limit sending to these addresses (admin resends)
+ * @returns {Promise<{ success: boolean, allSuccess: boolean, qrUrl?: string, skipped?: boolean, message?: string, results: Array<{ memberEmail: string, memberName?: string, status: string, id: string | null, error: string | null, attempts?: number }> }>}
  */
 export async function sendTeamConfirmationEmails({
   teamId,
@@ -175,7 +247,8 @@ export async function sendTeamConfirmationEmails({
   teamName: providedTeamName = '',
   teamLeader,
   members = [],
-  baseUrl = 'https://zencode.symphozen.com'
+  baseUrl = 'https://zencode.symphozen.com',
+  onlyEmails = null
 }) {
   if (!teamId) {
     throw new Error('teamId is required for generating registration passes');
@@ -261,8 +334,19 @@ export async function sendTeamConfirmationEmails({
     });
   }
 
-  const uniqueMembers = Array.from(allRecipientsMap.values());
+  const only = Array.isArray(onlyEmails) ? new Set(onlyEmails.map(e => String(e).trim().toLowerCase())) : null;
+  const uniqueMembers = Array.from(allRecipientsMap.values()).filter(m => !only || only.has(m.email));
   const emailResults = [];
+
+  // Hackathon teams also get the submission template.
+  let templateAttachment = null;
+  if (eventName === 'Hackathon') {
+    try {
+      templateAttachment = { filename: HACKATHON_TEMPLATE_NAME, content: await getHackathonTemplateBase64() };
+    } catch (templateErr) {
+      console.error('❌ [EMAIL ERROR] Could not read the hackathon template; sending without it:', templateErr);
+    }
+  }
 
   for (const member of uniqueMembers) {
     console.log(`[EMAIL] Preparing email for ${member.email}`);
@@ -289,7 +373,7 @@ export async function sendTeamConfirmationEmails({
     const passPdfFileName = `${sanitizeAttachmentName(`${eventName}-${member.admissionNumber || member.name || teamId}`)}.pdf`;
 
     try {
-      const response = await resend.emails.send({
+      const { response, attempts } = await sendWithRetry(resend, {
         from: fromAddress,
         to: [member.email],
         subject: `🎟️ Your ZEN CODE 2026 Check-in Pass (${eventName})`,
@@ -302,7 +386,8 @@ export async function sendTeamConfirmationEmails({
           {
             filename: 'team-checkin-qr.png',
             content: base64Content
-          }
+          },
+          ...(templateAttachment ? [templateAttachment] : [])
         ]
       });
 
@@ -313,18 +398,22 @@ export async function sendTeamConfirmationEmails({
         console.error(`[EMAIL ERROR] ${errorMsg}`);
         emailResults.push({
           memberEmail: member.email,
+          memberName: member.name,
           status: 'failed',
           id: null,
-          error: errorMsg
+          error: errorMsg,
+          attempts
         });
       } else if (response.data && response.data.id) {
         console.log(`[EMAIL] Resend response: ${JSON.stringify(response.data)}`);
         console.log(`[EMAIL] Email sent successfully to ${member.email}`);
         emailResults.push({
           memberEmail: member.email,
+          memberName: member.name,
           status: 'sent',
           id: response.data.id,
-          error: null
+          error: null,
+          attempts
         });
       } else {
         const errorMsg = 'Empty response data from Resend';
@@ -332,9 +421,11 @@ export async function sendTeamConfirmationEmails({
         console.error(`[EMAIL ERROR] ${errorMsg}`);
         emailResults.push({
           memberEmail: member.email,
+          memberName: member.name,
           status: 'failed',
           id: null,
-          error: errorMsg
+          error: errorMsg,
+          attempts
         });
       }
     } catch (err) {
@@ -343,9 +434,11 @@ export async function sendTeamConfirmationEmails({
       console.error(`[EMAIL ERROR] ${errorMsg}`);
       emailResults.push({
         memberEmail: member.email,
+        memberName: member.name,
         status: 'failed',
         id: null,
-        error: errorMsg
+        error: errorMsg,
+        attempts: 1
       });
     }
   }
@@ -359,4 +452,56 @@ export async function sendTeamConfirmationEmails({
     qrUrl: checkInUrl,
     results: emailResults
   };
+}
+
+const PASS_SUBJECT = /Check-in Pass \((Hackathon|Pitch Fest)\)/;
+const MAX_LIST_PAGES = 50;
+
+/**
+ * Latest check-in pass email Resend holds for each recipient, per event, with
+ * its delivery state (delivered, bounced, …). Listing needs a Full Access key.
+ *
+ * @returns {Promise<{ available: boolean, message?: string, emails: Array<{ email: string, event: string, id: string, lastEvent: string, createdAt: string }> }>}
+ */
+export async function listPassEmails() {
+  const apiKey = getServerEnv('RESEND_API_KEY');
+  const apiKeyConfigError = getResendApiKeyConfigError(apiKey);
+  if (apiKeyConfigError) return { available: false, message: apiKeyConfigError, emails: [] };
+
+  const resend = new Resend(apiKey);
+  const latest = new Map();
+  let after;
+
+  for (let page = 0; page < MAX_LIST_PAGES; page += 1) {
+    const response = await throttled(() => resend.emails.list({ limit: 100, ...(after ? { after } : {}) }));
+    if (response.error) {
+      const status = response.error.statusCode || response.error.status;
+      return {
+        available: false,
+        message: status === 401 || status === 403
+          ? 'Delivery status needs a Resend API key with Full Access (this one can only send).'
+          : getResendErrorMessage(response.error),
+        emails: [...latest.values()]
+      };
+    }
+
+    const items = response.data?.data ?? [];
+    for (const item of items) {
+      const event = PASS_SUBJECT.exec(item.subject || '')?.[1];
+      if (!event) continue;
+      for (const to of item.to || []) {
+        const email = String(to).trim().toLowerCase();
+        const key = `${event}|${email}`;
+        const existing = latest.get(key);
+        if (!existing || existing.createdAt < item.created_at) {
+          latest.set(key, { email, event, id: item.id, lastEvent: item.last_event, createdAt: item.created_at });
+        }
+      }
+    }
+
+    if (!response.data?.has_more || !items.length) break;
+    after = items[items.length - 1].id;
+  }
+
+  return { available: true, emails: [...latest.values()] };
 }
