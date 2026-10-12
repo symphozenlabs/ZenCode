@@ -14,7 +14,8 @@
 		X,
 		ExternalLink,
 		Radio,
-		MailCheck
+		MailCheck,
+		Award
 	} from '@lucide/svelte';
 	import { adminAuth } from '$lib/stores/admin-auth.svelte';
 	import { registrations } from '$lib/stores/registrations.svelte';
@@ -40,7 +41,10 @@
 		},
 		{
 			label: 'Engage',
-			items: [{ href: '/admin/live', label: 'Live sessions', icon: Radio }]
+			items: [
+				{ href: '/admin/live', label: 'Live sessions', icon: Radio },
+				{ href: '/admin/certificates', label: 'Certificates', icon: Award }
+			]
 		},
 		{
 			label: 'System',

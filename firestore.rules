@@ -166,6 +166,26 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Certificates (/admin/certificates). Designs are organiser-only. An issued
+    // certificate is keyed by its code, so anyone holding the code can fetch
+    // that one certificate (/verify/{code}) — but nobody else can list them.
+    match /certificateTemplates/{id} {
+      allow read, write: if isAdmin();
+    }
+    // A design frozen at issue time, keyed by its hash. Never changed after.
+    match /certificateDesigns/{id} {
+      allow get: if true;
+      allow list, create: if isAdmin();
+      allow update, delete: if false;
+    }
+    match /certificateIssues/{code} {
+      allow get: if true;
+      allow list, update, delete: if isAdmin();
+      allow create: if isAdmin()
+        && code.matches('ZC-[A-Z0-9]{4}-[A-Z0-9]{4}')
+        && request.resource.data.code == code;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
