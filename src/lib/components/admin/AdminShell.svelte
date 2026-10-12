@@ -77,9 +77,9 @@
 								href={item.href}
 								aria-current={active ? 'page' : undefined}
 								class="flex h-9 items-center gap-3 rounded-md px-3 text-sm transition-colors duration-150
-									{active ? 'bg-sidebar-accent font-medium text-white' : 'text-white/70 hover:bg-white/5 hover:text-white'}"
+									{active ? 'bg-white font-medium text-sidebar-accent' : 'text-white/70 hover:bg-white/5 hover:text-white'}"
 							>
-								<item.icon class="size-4 {active ? 'text-sidebar-primary' : ''}" />
+								<item.icon class="size-4 {active ? 'text-sidebar-accent' : ''}" />
 								<span class="flex-1">{item.label}</span>
 								{#if 'badge' in item && item.badge}
 									<span class="min-w-5 rounded-md bg-attention px-1.5 text-center text-[11px] leading-5 font-semibold text-white tabular" aria-label="{item.badge} new">{item.badge}</span>
@@ -101,8 +101,8 @@
 <div class="min-h-dvh bg-background font-sans text-foreground">
 	<!-- Desktop sidebar -->
 	<aside class="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col bg-sidebar lg:flex">
-		<div class="flex h-14 items-center border-b border-white/10 px-5">
-			<a href="/admin" aria-label="Dashboard"><Logo /></a>
+		<div class="flex h-14 items-center justify-center border-b border-white/10 px-5">
+			<a href="/admin" aria-label="Dashboard"><Logo tone="light" /></a>
 		</div>
 		{@render nav()}
 	</aside>
@@ -118,7 +118,7 @@
 		></button>
 		<aside class="fixed inset-y-0 left-0 z-50 flex w-64 flex-col bg-sidebar lg:hidden" transition:fly={{ x: -260, duration: 200, opacity: 1 }}>
 			<div class="flex h-14 items-center justify-between border-b border-white/10 px-5">
-				<Logo />
+				<Logo tone="light" />
 				<button type="button" class="rounded-md p-1.5 text-white/70 hover:text-white" aria-label="Close navigation" onclick={() => (mobileOpen = false)}>
 					<X class="size-5" />
 				</button>
