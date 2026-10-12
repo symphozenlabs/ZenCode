@@ -1,10 +1,12 @@
 <script lang="ts">
 	import type { SessionStatus } from '$lib/games/tech-word-rush/types';
+	import type { FlapStatus } from '$lib/games/flappy/types';
 
-	let { status }: { status: SessionStatus } = $props();
+	let { status }: { status: SessionStatus | FlapStatus } = $props();
 
-	const styles: Record<SessionStatus, { label: string; cls: string; dot: string; live?: boolean }> = {
+	const styles: Record<SessionStatus | FlapStatus, { label: string; cls: string; dot: string; live?: boolean }> = {
 		lobby: { label: 'Lobby open', cls: 'border-emerald-200 bg-emerald-50 text-emerald-800', dot: 'bg-emerald-500', live: true },
+		playing: { label: 'Flights live', cls: 'border-amber-200 bg-amber-50 text-amber-800', dot: 'bg-amber-500', live: true },
 		question: { label: 'Word live', cls: 'border-amber-200 bg-amber-50 text-amber-800', dot: 'bg-amber-500', live: true },
 		result: { label: 'Showing result', cls: 'border-emerald-200 bg-emerald-50 text-emerald-800', dot: 'bg-emerald-500', live: true },
 		leaderboard: { label: 'Leaderboard', cls: 'border-emerald-200 bg-emerald-50 text-emerald-800', dot: 'bg-emerald-500', live: true },
