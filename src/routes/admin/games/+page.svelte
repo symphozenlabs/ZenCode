@@ -10,6 +10,7 @@
 	import { createSession } from '$lib/games/tech-word-rush/api';
 	import { createSession as createFlappySession } from '$lib/games/flappy/api';
 	import { DURATIONS as FLAP_DURATIONS, durationLabel, type FlapSession } from '$lib/games/flappy/types';
+	import { isFlyGame } from '$lib/games/flappy/skins';
 	import { formatTimestamp } from '$lib/utils/format';
 	import PageHeader from '$lib/components/admin/PageHeader.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -74,9 +75,9 @@
 		try {
 			const token = await adminAuth.user?.getIdToken();
 			if (!token) throw new Error('Your session expired. Sign in again.');
-			if (startFor === 'flappy') {
-				const { code } = await createFlappySession(token, Number(flapDuration));
-				await goto(presenterHref('flappy', code));
+			if (isFlyGame(startFor)) {
+				const { code } = await createFlappySession(token, Number(flapDuration), startFor);
+				await goto(presenterHref(startFor, code));
 			} else {
 				const { code } = await createSession(token, Number(duration));
 				await goto(presenterHref('tech-word-rush', code));
@@ -115,7 +116,9 @@
 					<div class="relative flex h-full flex-col justify-between">
 						<p class="eyebrow text-green-300/80">Live game</p>
 						<div>
-							{#if game.id === 'flappy'}
+							{#if game.id === 'symba'}
+								<img src="/games/symba/boost.webp" alt="" class="absolute -top-6 -right-4 h-44 w-auto drop-shadow-[0_12px_24px_rgba(0,0,0,0.45)] transition-transform duration-500 group-hover:-translate-y-2 group-hover:rotate-[-3deg]" />
+							{:else if game.id === 'flappy'}
 								<svg viewBox="0 0 160 70" class="absolute -top-1 right-0 h-28 w-auto" aria-hidden="true">
 									<defs>
 										<linearGradient id="bamboo-art" x1="0" x2="1">
@@ -207,7 +210,7 @@
 						<SessionStatusBadge status={s.status} />
 						<span class="inline-flex items-center gap-1 text-xs text-muted-foreground tabular"><Users class="size-3.5" />{s.playerCount}</span>
 						<span class="text-xs text-muted-foreground tabular">
-							{#if s.gameType === 'flappy'}
+							{#if s.gameType !== 'tech-word-rush'}
 								{s.status === 'lobby' ? `${durationLabel(s.duration)} window` : 'Flights live'}
 							{:else}
 								{s.questionIndex < 0 ? 'Not started' : `Word ${s.questionIndex + 1} / ${s.totalQuestions}`}
@@ -268,11 +271,11 @@
 
 <Modal
 	open={startOpen}
-	title={startFor === 'flappy' ? 'Start Flappy Bird' : 'Start Tech Word Rush'}
+	title="Start {startFor ? gameName(startFor) : ''}"
 	description="Opens a lobby with a QR code for players to join."
 	onclose={() => !creating && (startFor = null)}
 >
-	{#if startFor === 'flappy'}
+	{#if isFlyGame(startFor)}
 		<div class="space-y-4">
 			<SelectField label="Game length" bind:value={flapDuration} options={FLAP_DURATIONS.map((d) => ({ value: String(d), label: durationLabel(d) }))} />
 			<ul class="space-y-1.5 text-[13px] text-muted-foreground">

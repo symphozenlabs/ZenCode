@@ -11,6 +11,7 @@
 	import { SESSIONS } from '$lib/games/tech-word-rush/types';
 	import { control } from '$lib/games/flappy/api';
 	import { asRankEntries, durationLabel, formatClock, type FlapControl, type FlapPlayer, type FlapSession } from '$lib/games/flappy/types';
+	import { isFlyGame, skinFor } from '$lib/games/flappy/skins';
 	import Logo from '$lib/components/site/Logo.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
@@ -35,7 +36,7 @@
 			doc(db(), SESSIONS, c),
 			(snap) => {
 				const s = snap.data() as FlapSession | undefined;
-				session = s?.gameType === 'flappy' ? s : null;
+				session = s && isFlyGame(s.gameType) ? s : null;
 				loadState = session ? 'ready' : 'missing';
 			},
 			() => (loadState = 'error')
@@ -80,6 +81,8 @@
 	});
 
 	const status = $derived(session?.status ?? 'lobby');
+	const skin = $derived(skinFor(session?.gameType ?? (code.startsWith('ZS') ? 'symba' : 'flappy')));
+	const [titleTop, titleBottom] = $derived(skin.name.split(' '));
 	const endsAt = $derived(session?.timerEndsAt ?? null);
 	const timeLeft = $derived(endsAt ? Math.max(0, endsAt - now) : 0);
 	const fraction = $derived(session && endsAt ? Math.min(1, timeLeft / (session.duration * 1000)) : 1);
@@ -117,12 +120,14 @@
 	const medal = (rank: number) => (rank === 1 ? '🥇' : rank === 2 ? '🥈' : '🥉');
 </script>
 
-<svelte:head><title>{code} · Flappy Bird — ZenCode</title></svelte:head>
+<svelte:head><title>{code} · {skin.name} — ZenCode</title></svelte:head>
 <svelte:document onfullscreenchange={() => (fullscreen = !!document.fullscreenElement)} />
 
 <div class="relative isolate flex min-h-dvh flex-col overflow-hidden bg-stage font-sans text-cream">
 	<!-- The bird flies itself behind everything -->
-	<div class="absolute inset-0 -z-10"><FlappyGame mode="demo" /></div>
+	<div class="absolute inset-0 -z-10">
+		{#key skin.id}<FlappyGame skin={skin.id} mode="demo" />{/key}
+	</div>
 	<div
 		class="pointer-events-none absolute inset-0 -z-10 transition-colors duration-700 {status === 'finished'
 			? 'bg-stage/80'
@@ -135,7 +140,7 @@
 	<header class="flex items-center gap-4 border-b border-white/10 bg-stage/50 px-5 py-3 backdrop-blur md:px-8">
 		<Logo />
 		<span class="hidden h-5 w-px bg-white/15 sm:block"></span>
-		<p class="hidden font-display text-sm font-bold tracking-[0.18em] uppercase sm:block">Flappy Bird</p>
+		<p class="hidden font-display text-sm font-bold tracking-[0.18em] uppercase sm:block">{skin.name}</p>
 		<div class="ml-auto flex items-center gap-2 md:gap-4">
 			<span class="rounded-md border border-white/15 px-2.5 py-1 font-mono text-sm font-semibold tracking-[0.2em] text-sun">{code}</span>
 			<span class="inline-flex items-center gap-1.5 text-sm text-cream/80 tabular" aria-live="polite"><Users class="size-4" />{players.length}</span>
@@ -165,7 +170,7 @@
 							<div class="m-auto grid w-full max-w-6xl items-center gap-10 lg:grid-cols-[1.15fr_1fr]">
 								<div class="text-center lg:text-left">
 									<p class="eyebrow text-green-300">Ice breaker</p>
-									<h1 class="flappy-head mt-3 font-display text-6xl leading-[0.88] font-bold tracking-tight uppercase md:text-8xl">Flappy<br />Bird</h1>
+									<h1 class="flappy-head mt-3 font-display text-6xl leading-[0.88] font-bold tracking-tight uppercase md:text-8xl">{titleTop}<br />{titleBottom}</h1>
 									<p class="mt-5 max-w-lg text-lg text-cream/85 md:text-xl lg:max-w-none">
 										Fly as often as you like for <span class="font-semibold text-sun">{durationLabel(session.duration)}</span>. Every new flight replaces your last score —
 										<span class="font-semibold text-sun">only your latest counts.</span>
@@ -265,7 +270,7 @@
 							<!-- FINAL -->
 							{#if !session.ranking && podium.length}<Confetti count={140} />{/if}
 							<div class="relative mx-auto w-full max-w-4xl">
-								<p class="eyebrow text-center text-green-300">Flappy Bird</p>
+								<p class="eyebrow text-center text-green-300">{skin.name}</p>
 								<h2 class="flappy-head mt-2 text-center font-display text-5xl font-bold tracking-tight uppercase md:text-7xl">Final leaderboard</h2>
 								{#if session.ranking}
 									<div class="mt-16 flex flex-col items-center gap-4 text-cream/80">

@@ -9,6 +9,7 @@
 	import { serverNow } from '$lib/games/tech-word-rush/api';
 	import { CODE_RE, asRankEntries, formatClock, type FlapSession, type FlapView } from '$lib/games/flappy/types';
 	import { forgetIdentity, join, loadIdentity, play, type Identity } from '$lib/games/flappy/api';
+	import { isFlyGame, skinFor } from '$lib/games/flappy/skins';
 	import { isMuted, setMuted, unlockAudio } from '$lib/games/flappy/audio';
 	import FlappyGame from '$lib/components/games/flappy/FlappyGame.svelte';
 	import Leaderboard from '$lib/components/games/Leaderboard.svelte';
@@ -37,7 +38,7 @@
 			doc(db(), SESSIONS, c),
 			(snap) => {
 				const s = snap.data() as FlapSession | undefined;
-				session = s?.gameType === 'flappy' ? s : null;
+				session = s && isFlyGame(s.gameType) ? s : null;
 				loadState = session ? 'ready' : 'missing';
 			},
 			() => (loadState = 'error')
@@ -45,6 +46,8 @@
 	});
 
 	const status = $derived(session?.status ?? 'lobby');
+	const skin = $derived(skinFor(session?.gameType ?? (code.startsWith('ZS') ? 'symba' : 'flappy')));
+	const [titleTop, titleBottom] = $derived(skin.name.split(' '));
 
 	// Shared clock: ticks a few times a second for the countdown.
 	let now = $state(serverNow());
@@ -199,7 +202,7 @@
 	const medal = (rank: number) => (rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '');
 </script>
 
-<svelte:head><title>Flappy Bird · {code} — ZenCode</title></svelte:head>
+<svelte:head><title>{skin.name} · {code} — ZenCode</title></svelte:head>
 <svelte:window
 	onkeydown={(e) => {
 		if (e.key === 'Enter' && phase === 'over' && (status === 'lobby' || live) && !(e.target instanceof HTMLButtonElement)) flyAgain();
@@ -225,11 +228,11 @@
 	{:else if status === 'finished'}
 		<!-- FINAL RESULTS -->
 		{#if mine && mine.rank <= 3 && !session.ranking}<Confetti />{/if}
-		<div class="absolute inset-0 opacity-35"><FlappyGame mode="demo" /></div>
+		<div class="absolute inset-0 opacity-35">{#key skin.id}<FlappyGame skin={skin.id} mode="demo" />{/key}</div>
 		<div class="absolute inset-0 bg-gradient-to-b from-stage/70 via-stage/85 to-stage"></div>
 		<main class="relative mx-auto flex w-full max-w-md flex-1 flex-col overflow-y-auto px-4 pt-[max(1.25rem,env(safe-area-inset-top))] pb-8">
 			<Logo />
-			<p class="eyebrow mt-8 text-green-300">Flappy Bird · {code}</p>
+			<p class="eyebrow mt-8 text-green-300">{skin.name} · {code}</p>
 			<h1 class="mt-2 font-display text-4xl font-bold tracking-tight uppercase">Final leaderboard</h1>
 			{#if session.ranking}
 				<div class="mt-16 flex items-center justify-center gap-3 text-cream/70" role="status"><Spinner /> Counting final scores…</div>
@@ -263,12 +266,12 @@
 		</main>
 	{:else if !identity}
 		<!-- JOIN -->
-		<div class="absolute inset-0"><FlappyGame mode="demo" /></div>
+		<div class="absolute inset-0">{#key skin.id}<FlappyGame skin={skin.id} mode="demo" />{/key}</div>
 		<div class="absolute inset-0 bg-gradient-to-t from-stage via-stage/70 to-stage/10"></div>
 		<main class="relative mx-auto flex w-full max-w-md flex-1 flex-col justify-end px-5 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
 			<div in:fly={{ y: 24, duration: 450 }}>
 				<p class="eyebrow text-green-300">Ice breaker · {code}</p>
-				<h1 class="flappy-head mt-2 font-display text-6xl leading-[0.9] font-bold tracking-tight uppercase">Flappy<br />Bird</h1>
+				<h1 class="flappy-head mt-2 font-display text-6xl leading-[0.9] font-bold tracking-tight uppercase">{titleTop}<br />{titleBottom}</h1>
 				<p class="mt-3 text-cream/80">
 					{#if live}
 						It’s live — {formatClock(timeLeft)} left. Fly as often as you like; only your <span class="font-semibold text-sun">latest</span> flight counts.
@@ -299,7 +302,7 @@
 		<!-- PLAY -->
 		<header class="relative z-20 flex items-center gap-3 px-4 pt-[max(0.6rem,env(safe-area-inset-top))] pb-2">
 			<div class="min-w-0">
-				<p class="truncate font-display text-sm leading-tight font-bold tracking-[0.14em] uppercase">Flappy Bird</p>
+				<p class="truncate font-display text-sm leading-tight font-bold tracking-[0.14em] uppercase">{skin.name}</p>
 				<p class="truncate text-[11px] text-cream/55">{identity.name} · <span class="font-mono tracking-[0.15em]">{code}</span></p>
 			</div>
 			<div class="ml-auto flex items-center gap-2">
@@ -327,7 +330,9 @@
 
 		<main class="relative flex min-h-0 flex-1 justify-center p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:p-4">
 			<div class="relative h-full w-full max-w-[30rem] overflow-hidden rounded-2xl border border-white/10 shadow-2xl shadow-black/50">
+				{#key skin.id}
 				<FlappyGame
+					skin={skin.id}
 					bind:this={game}
 					bind:phase
 					bind:score={flightScore}
@@ -349,7 +354,7 @@
 									<p class="eyebrow text-cream/60">{lastResult?.ranked ? 'Flight over' : 'Practice flight'}</p>
 								{/if}
 								<p class="mt-2 font-display text-7xl leading-none font-bold text-cream tabular">{lastResult?.score ?? flightScore}</p>
-								<p class="mt-1 text-sm text-cream/55">{(lastResult?.score ?? flightScore) === 1 ? 'pipe' : 'pipes'}</p>
+								<p class="mt-1 text-sm text-cream/55">{skin.obstacle[(lastResult?.score ?? flightScore) === 1 ? 0 : 1]}</p>
 
 								<div class="mt-4 min-h-10 text-sm" aria-live="polite">
 									{#if !lastResult?.ranked}
@@ -376,6 +381,7 @@
 						</div>
 					{/snippet}
 				</FlappyGame>
+				{/key}
 
 				<!-- Current entry -->
 				{#if status === 'playing' && phase === 'ready'}
