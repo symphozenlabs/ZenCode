@@ -1,10 +1,12 @@
 <script lang="ts">
-	import type { Snippet } from 'svelte';
+	import { untrack, type Snippet } from 'svelte';
 	import { fade, scale } from 'svelte/transition';
 	import { backOut } from 'svelte/easing';
-	import { STEP, autopilot, createWorld, flap, step, type GameEvent, type Phase, type World } from '$lib/games/flappy/engine';
+	import { STEP, WORLD_H, autopilot, createWorld, flap, step, type GameEvent, type Phase, type World } from '$lib/games/flappy/engine';
 	import { createRenderer, type Particle } from '$lib/games/flappy/render';
-	import { play as sfx, unlockAudio } from '$lib/games/flappy/audio';
+	import { createCityRenderer } from '$lib/games/flappy/render-city';
+	import { play as playSound, playSample, preloadSample, unlockAudio, type Sound } from '$lib/games/flappy/audio';
+	import { SKINS, type FlyGame } from '$lib/games/flappy/skins';
 	import { serverNow } from '$lib/games/tech-word-rush/api';
 
 	/**
@@ -15,6 +17,8 @@
 	 * Taps are read on pointerdown (not click) for the lowest latency.
 	 */
 	interface Props {
+		/** Which game's look: Flappy Bird or Symba Ride. */
+		skin?: FlyGame;
 		mode?: 'play' | 'demo';
 		/** False blocks starting a new flight (e.g. time is up). */
 		canPlay?: boolean;
@@ -31,6 +35,7 @@
 		class?: string;
 	}
 	let {
+		skin = 'flappy',
 		mode = 'play',
 		canPlay = true,
 		deadline = null,
@@ -48,7 +53,33 @@
 	let paused = $state(false);
 	let timeUp = $state(false);
 
-	let world: World = createWorld();
+	// Fixed for the component's life: the parent re-keys it to switch games.
+	const look = untrack(() => SKINS[skin]);
+	const newWorld = () => createWorld(undefined, look.radius);
+	if (look.milestoneSound) preloadSample(look.milestoneSound);
+	if (look.crashSound) preloadSample(look.crashSound);
+	if (look.crashSticker && typeof Image !== 'undefined') new Image().src = look.crashSticker;
+	// The self-flying demo behind the lobby stays silent.
+	const sfx = (s: Sound) => mode === 'play' && playSound(s);
+	const clip = (url: string) => mode === 'play' && playSample(url);
+
+	/** The comic "FAAH!" sticker, popped where the crash happened (CSS px). */
+	let sticker = $state<{ id: number; x: number; y: number } | null>(null);
+	let stickerTimer: ReturnType<typeof setTimeout> | undefined;
+	function popSticker() {
+		if (!look.crashSticker || !renderer || !host) return;
+		const s = host.clientHeight / WORLD_H;
+		const w = host.clientWidth;
+		const half = Math.min(w * 0.36, 170);
+		// Above and ahead of the mascot, so its crash pose stays in view.
+		const x = Math.max(half + 8, Math.min(w - half - 8, renderer.birdX * s + 70));
+		const y = Math.max(110, Math.min(host.clientHeight - 200, world.y * s - 110));
+		sticker = { id: performance.now(), x, y };
+		clearTimeout(stickerTimer);
+		stickerTimer = setTimeout(() => (sticker = null), 1700);
+	}
+
+	let world: World = newWorld();
 	const prev = { y: world.y, rot: world.rot, distance: 0, scroll: 0 };
 	let particles: Particle[] = [];
 	let shake = 0;
@@ -68,12 +99,13 @@
 
 	/** Back to the get-ready screen with a fresh course. */
 	export function reset() {
-		world = createWorld();
+		world = newWorld();
 		syncPrev();
 		particles = [];
 		shake = flash = 0;
 		paused = false;
 		timeUp = false;
+		sticker = null;
 		phase = 'ready';
 		score = 0;
 	}
@@ -119,7 +151,10 @@
 		}
 		if (flap(world)) {
 			sfx('flap');
-			if (!reduced) burst('puff', 2, renderer!.birdX - 14, world.y + 6, { speed: 40, size: 3, ttl: 0.35, vx: -world.speed * 0.5 });
+			if (reduced) return;
+			if (look.id === 'symba')
+				burst('spark', 5, renderer!.birdX - 30, world.y + 4, { speed: 120, size: 3.5, ttl: 0.4, spread: Math.PI * 0.6, vx: -world.speed - 80, vy: 90, colors: ['#ffd36b', '#ff8a2b', '#fff3c4'] });
+			else burst('puff', 2, renderer!.birdX - 14, world.y + 6, { speed: 40, size: 3, ttl: 0.35, vx: -world.speed * 0.5 });
 		}
 	}
 
@@ -129,18 +164,26 @@
 			if (e === 'score') {
 				score = world.score;
 				const milestone = world.score % 10 === 0;
-				sfx(milestone ? 'milestone' : 'score');
+				// Symba roars (the Singam tone) at every 10 points.
+				if (!(milestone && look.milestoneSound && clip(look.milestoneSound))) sfx(milestone ? 'milestone' : 'score');
 				if (!reduced) burst('spark', milestone ? 18 : 6, bx, world.y, { speed: milestone ? 260 : 150, size: milestone ? 6 : 4.5, ttl: 0.7, colors: ['#fff3b0', '#ffd34e', '#ffffff'] });
 			} else if (e === 'hit') {
-				sfx('hit');
+				// Symba: "FAAH!" — the clip plus a comic sticker. Others: a thud.
+				if (look.crashSound) {
+					if (!clip(look.crashSound)) sfx('hit');
+				} else sfx('hit');
+				popSticker();
 				if (mode === 'play') navigator.vibrate?.(45);
 				if (!reduced) {
 					shake = 1;
 					flash = 1;
 					slowUntil = performance.now() + 380;
-					burst('feather', 14, bx, world.y, { speed: 210, size: 6, ttl: 1.6, colors: ['#ffd34e', '#f5a623', '#fff1c1', '#e48a24'] });
+					if (look.id === 'symba') {
+						burst('spark', 16, bx - 20, world.y, { speed: 240, size: 5, ttl: 0.8, colors: ['#ffb02e', '#ff6a1a', '#ffe08a'] });
+						burst('dust', 10, bx - 24, world.y - 6, { speed: 60, size: 7, ttl: 1.2, vy: -40 });
+					} else burst('feather', 14, bx, world.y, { speed: 210, size: 6, ttl: 1.6, colors: ['#ffd34e', '#f5a623', '#fff1c1', '#e48a24'] });
 				}
-				if (world.phase === 'dying') sfx('fall');
+				if (world.phase === 'dying' && !look.crashSound) sfx('fall');
 			} else if (e === 'ground') {
 				if (!reduced) {
 					shake = Math.max(shake, 0.45);
@@ -165,7 +208,7 @@
 
 	$effect(() => {
 		if (!canvas || !host) return;
-		const r = createRenderer(canvas);
+		const r = look.id === 'symba' ? createCityRenderer(canvas) : createRenderer(canvas);
 		renderer = r;
 		const fit = () => r.resize(host!.clientWidth, host!.clientHeight, window.devicePixelRatio);
 		fit();
@@ -197,7 +240,7 @@
 			}
 
 			if (mode === 'demo' && world.phase === 'over' && now >= restartAt) {
-				world = createWorld();
+				world = newWorld();
 				flap(world);
 				syncPrev();
 			}
@@ -296,9 +339,22 @@
 	{onpointerdown}
 	oncontextmenu={(e) => e.preventDefault()}
 	role={mode === 'play' ? 'application' : 'img'}
-	aria-label={mode === 'play' ? 'Flappy Bird. Tap or press Space to flap.' : 'Flappy Bird demo'}
+	aria-label={mode === 'play' ? `${look.name}. Tap or press Space to fly.` : `${look.name} demo`}
 >
 	<canvas bind:this={canvas} class="absolute inset-0 block size-full"></canvas>
+
+	{#if sticker && look.crashSticker}
+		{#key sticker.id}
+			<div class="faah pointer-events-none absolute z-40" style:left="{sticker.x}px" style:top="{sticker.y}px" aria-hidden="true">
+				<span class="faah-ring"></span>
+				<span class="faah-ring faah-ring-2"></span>
+				{#each Array(10) as _, i (i)}
+					<span class="faah-dot" style:--a="{i * 36}deg" style:--d="{80 + (i % 3) * 22}px"></span>
+				{/each}
+				<img src={look.crashSticker} alt="" class="faah-img" draggable="false" />
+			</div>
+		{/key}
+	{/if}
 
 	{#if mode === 'play'}
 		<!-- Score -->
@@ -362,9 +418,121 @@
 			transform: translateY(6px) scale(0.92);
 		}
 	}
+	/* Comic crash sticker: slam in, wobble, hold, then pop away. */
+	.faah {
+		width: min(72%, 340px);
+		translate: -50% -50%;
+	}
+	.faah-img {
+		display: block;
+		width: 100%;
+		height: auto;
+		filter: drop-shadow(0 6px 0 rgba(0, 0, 0, 0.35));
+		animation: faah-pop 1.65s cubic-bezier(0.2, 0.9, 0.25, 1) both;
+	}
+	@keyframes faah-pop {
+		0% {
+			transform: scale(0.1) rotate(-28deg);
+			opacity: 0;
+		}
+		14% {
+			transform: scale(1.32) rotate(7deg);
+			opacity: 1;
+		}
+		24% {
+			transform: scale(0.9) rotate(-5deg);
+		}
+		33% {
+			transform: scale(1.08) rotate(3deg);
+		}
+		42%,
+		52% {
+			transform: scale(1) rotate(-2deg);
+		}
+		47% {
+			transform: scale(1.03) rotate(1.5deg);
+		}
+		82% {
+			transform: scale(1) rotate(-2deg);
+			opacity: 1;
+		}
+		100% {
+			transform: scale(1.5) rotate(6deg);
+			opacity: 0;
+		}
+	}
+	.faah-ring {
+		position: absolute;
+		left: 50%;
+		top: 50%;
+		width: 60%;
+		aspect-ratio: 1;
+		border-radius: 9999px;
+		border: 6px solid #ffe14d;
+		translate: -50% -50%;
+		animation: faah-ring 0.6s ease-out both;
+	}
+	.faah-ring-2 {
+		border-color: #ffffff;
+		border-width: 3px;
+		animation-delay: 0.08s;
+	}
+	@keyframes faah-ring {
+		0% {
+			transform: scale(0.2);
+			opacity: 1;
+		}
+		100% {
+			transform: scale(2.1);
+			opacity: 0;
+		}
+	}
+	.faah-dot {
+		position: absolute;
+		left: 50%;
+		top: 50%;
+		width: 12px;
+		height: 12px;
+		margin: -6px;
+		border-radius: 9999px;
+		background: #ff3b30;
+		box-shadow: 0 0 0 3px #1b1b1b;
+		animation: faah-dot 0.7s ease-out both;
+	}
+	.faah-dot:nth-child(odd) {
+		background: #ffd23f;
+	}
+	@keyframes faah-dot {
+		0% {
+			transform: rotate(var(--a)) translateY(0) scale(1.2);
+			opacity: 1;
+		}
+		100% {
+			transform: rotate(var(--a)) translateY(calc(-1 * var(--d))) scale(0);
+			opacity: 0;
+		}
+	}
 	@media (prefers-reduced-motion: reduce) {
-		.tap-hint {
+		.tap-hint,
+		.faah-ring,
+		.faah-dot {
 			animation: none;
+		}
+		.faah-ring,
+		.faah-dot {
+			display: none;
+		}
+		.faah-img {
+			animation: faah-fade 1.6s both;
+		}
+		@keyframes faah-fade {
+			0%,
+			85% {
+				opacity: 1;
+			}
+			100% {
+				opacity: 0;
+			}
 		}
 	}
 </style>

@@ -10,6 +10,9 @@ let ctx: AudioContext | null = null;
 let noise: AudioBuffer | null = null;
 let master: GainNode | null = null;
 let muted = loadMuted();
+/** Recorded clips (e.g. the Singam tone), decoded once the context exists. */
+const samples = new Map<string, AudioBuffer>();
+const wanted = new Set<string>();
 
 function loadMuted() {
 	try {
@@ -44,9 +47,40 @@ export function unlockAudio() {
 			for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
 		}
 		if (ctx.state === 'suspended') void ctx.resume();
+		for (const url of wanted) void loadSample(url);
 	} catch {
 		ctx = null;
 	}
+}
+
+async function loadSample(url: string) {
+	if (!ctx || samples.has(url)) return;
+	try {
+		const res = await fetch(url);
+		samples.set(url, await ctx.decodeAudioData(await res.arrayBuffer()));
+	} catch {
+		/* the synthesised sounds still play */
+	}
+}
+
+/** Ask for a clip to be ready; it loads on the first tap (audio needs a gesture). */
+export function preloadSample(url: string) {
+	wanted.add(url);
+	if (ctx) void loadSample(url);
+}
+
+/** Plays a preloaded clip. Returns false if it isn't ready, so a fallback can play. */
+export function playSample(url: string, gain = 1): boolean {
+	if (muted) return true;
+	const buf = samples.get(url);
+	if (!ctx || ctx.state !== 'running' || !buf) return false;
+	const src = ctx.createBufferSource();
+	src.buffer = buf;
+	const g = ctx.createGain();
+	g.gain.value = gain;
+	src.connect(g).connect(ctx.destination);
+	src.start();
+	return true;
 }
 
 function tone(type: OscillatorType, from: number, to: number, at: number, dur: number, gain: number) {

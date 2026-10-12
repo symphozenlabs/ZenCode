@@ -1,5 +1,6 @@
 import { GameError, syncClock } from '$lib/games/tech-word-rush/api';
 import type { FlapAction, FlapControl, FlapView } from './types';
+import type { FlyGame } from './skins';
 
 /**
  * Browser calls to the Flappy Bird endpoints. Shares the clock offset with
@@ -26,7 +27,7 @@ async function post<T>(url: string, body: unknown, token?: string): Promise<T> {
 
 // Admin ──────────────────────────────────────────────────────────────────
 
-export const createSession = (token: string, duration: number) => post<{ code: string }>(BASE, { duration }, token);
+export const createSession = (token: string, duration: number, game: FlyGame = 'flappy') => post<{ code: string }>(BASE, { duration, game }, token);
 
 export async function control(token: string, code: string, action: FlapControl) {
 	const res = await post<{ now: number }>(`${BASE}/${code}/control`, { action }, token);

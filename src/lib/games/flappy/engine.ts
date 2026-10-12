@@ -63,6 +63,8 @@ export interface World {
 	flapAt: number;
 	hitAt: number;
 	rng: number;
+	/** Hitbox radius (the bird, or a bigger mascot). */
+	r: number;
 }
 
 export const READY_Y = WORLD_H * 0.42;
@@ -75,7 +77,7 @@ function random(w: World): number {
 	return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 }
 
-export function createWorld(seed = (Math.random() * 2 ** 32) >>> 0): World {
+export function createWorld(seed = (Math.random() * 2 ** 32) >>> 0, radius = BIRD_R): World {
 	return {
 		phase: 'ready',
 		time: 0,
@@ -89,7 +91,8 @@ export function createWorld(seed = (Math.random() * 2 ** 32) >>> 0): World {
 		pipes: [],
 		flapAt: -1,
 		hitAt: -1,
-		rng: seed | 0
+		rng: seed | 0,
+		r: radius
 	};
 }
 
@@ -122,10 +125,10 @@ export function flap(w: World): boolean {
 	return true;
 }
 
-function circleHitsRect(cy: number, left: number, right: number, top: number, bottom: number) {
+function circleHitsRect(r: number, cy: number, left: number, right: number, top: number, bottom: number) {
 	const nx = Math.max(left, Math.min(0, right));
 	const ny = Math.max(top, Math.min(cy, bottom));
-	return nx * nx + (cy - ny) * (cy - ny) < BIRD_R * BIRD_R;
+	return nx * nx + (cy - ny) * (cy - ny) < r * r;
 }
 
 /** Advance one step. The bird sits at x = 0; pipes are relative to it. */
@@ -145,8 +148,8 @@ export function step(w: World, dt: number, events: GameEvent[] = []): GameEvent[
 
 	if (w.phase === 'dying') {
 		w.rot += (Math.PI / 2 - w.rot) * Math.min(1, dt * 9);
-		if (w.y + BIRD_R >= GROUND_Y) {
-			w.y = GROUND_Y - BIRD_R;
+		if (w.y + w.r >= GROUND_Y) {
+			w.y = GROUND_Y - w.r;
 			w.phase = 'over';
 			events.push('ground');
 		}
@@ -154,8 +157,8 @@ export function step(w: World, dt: number, events: GameEvent[] = []): GameEvent[
 	}
 
 	// Playing
-	if (w.y < BIRD_R) {
-		w.y = BIRD_R;
+	if (w.y < w.r) {
+		w.y = w.r;
 		w.vy = Math.max(w.vy, 0);
 	}
 	w.speed = Math.min(MAX_SPEED, BASE_SPEED + w.score * SPEED_PER_POINT);
@@ -170,8 +173,8 @@ export function step(w: World, dt: number, events: GameEvent[] = []): GameEvent[
 	for (const p of w.pipes) {
 		const left = p.d - w.distance;
 		const right = left + PIPE_W;
-		if (left > BIRD_R) break;
-		if (right < -BIRD_R) {
+		if (left > w.r) break;
+		if (right < -w.r) {
 			if (!p.passed) {
 				p.passed = true;
 				w.score++;
@@ -186,7 +189,7 @@ export function step(w: World, dt: number, events: GameEvent[] = []): GameEvent[
 		}
 		const top = p.gapY - p.gap / 2;
 		const bottom = p.gapY + p.gap / 2;
-		if (circleHitsRect(w.y, left, right, -1e4, top) || circleHitsRect(w.y, left, right, bottom, GROUND_Y)) {
+		if (circleHitsRect(w.r, w.y, left, right, -1e4, top) || circleHitsRect(w.r, w.y, left, right, bottom, GROUND_Y)) {
 			w.phase = 'dying';
 			w.hitAt = w.time;
 			w.vy = Math.min(w.vy, -140);
@@ -195,8 +198,8 @@ export function step(w: World, dt: number, events: GameEvent[] = []): GameEvent[
 		}
 	}
 
-	if (w.y + BIRD_R >= GROUND_Y) {
-		w.y = GROUND_Y - BIRD_R;
+	if (w.y + w.r >= GROUND_Y) {
+		w.y = GROUND_Y - w.r;
 		w.phase = 'over';
 		w.hitAt = w.time;
 		events.push('hit', 'ground');
@@ -220,17 +223,17 @@ export function maxScore(ms: number): number {
  */
 export function autopilot(w: World) {
 	if (w.phase !== 'playing') return;
-	const i = w.pipes.findIndex((p) => p.d + PIPE_W - w.distance > -BIRD_R);
+	const i = w.pipes.findIndex((p) => p.d + PIPE_W - w.distance > -w.r);
 	const cur = w.pipes[i];
 	if (!cur) {
 		if (w.y > WORLD_H * 0.45 && w.vy > -60) flap(w);
 		return;
 	}
 	// A flap lifts the bird ~85 units above where it fired, so aim low in the gap.
-	const lo = cur.gapY - cur.gap / 2 + BIRD_R + 88;
-	const hi = cur.gapY + cur.gap / 2 - BIRD_R - 14;
+	const lo = cur.gapY - cur.gap / 2 + w.r + 88;
+	const hi = cur.gapY + cur.gap / 2 - w.r - 14;
 	const next = w.pipes[i + 1];
-	const inside = cur.d - w.distance < BIRD_R + 40;
+	const inside = cur.d - w.distance < w.r + 40;
 	const want = inside && next ? next.gapY + next.gap * 0.14 : cur.gapY + cur.gap * 0.14;
 	const target = Math.max(lo, Math.min(hi, want));
 	if (w.y > target && w.vy > -60) flap(w);

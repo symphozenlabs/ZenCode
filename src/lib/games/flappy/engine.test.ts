@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { BIRD_R, GROUND_Y, STEP, autopilot, createWorld, flap, maxScore, step, type GameEvent } from './engine';
 
-function fly(seed: number, seconds: number, pilot = true) {
-	const w = createWorld(seed);
+function fly(seed: number, seconds: number, pilot = true, radius?: number) {
+	const w = createWorld(seed, radius);
 	flap(w);
 	const events: GameEvent[] = [];
 	for (let t = 0; t < seconds && w.phase === 'playing'; t += STEP) {
@@ -38,6 +38,10 @@ describe('flappy engine', () => {
 
 	it('is passable: the autopilot clears many pipes', () => {
 		for (const seed of [3, 11, 42, 99]) expect(fly(seed, 120).w.score).toBeGreaterThan(25);
+	});
+
+	it('is passable with the bigger Symba hitbox', () => {
+		for (const seed of [3, 11, 42, 99]) expect(fly(seed, 120, true, 16).w.score).toBeGreaterThan(20);
 	});
 
 	it('never scores faster than maxScore allows', () => {
