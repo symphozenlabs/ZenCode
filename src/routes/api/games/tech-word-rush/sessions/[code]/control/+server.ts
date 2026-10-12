@@ -8,5 +8,6 @@ export const POST: RequestHandler = ({ request, params }) =>
 	handle(async () => {
 		await requireAdmin(request);
 		const body = await readBody(request);
-		return control(parseCode(params.code), body.action as ControlAction);
+		const index = Number.isInteger(body.index) ? (body.index as number) : undefined;
+		return control(parseCode(params.code), body.action as ControlAction, index);
 	});

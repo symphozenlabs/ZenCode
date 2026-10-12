@@ -9,10 +9,12 @@ import {
 	increment,
 	runTransaction,
 	updateDoc,
+	writeBatch,
 	type DocumentSnapshot,
 	type Firestore
 } from 'firebase/firestore';
-import { adminDb } from '$lib/server/admin-session';
+import { adminDb, writerDb } from '$lib/server/admin-session';
+import { withLock } from '$lib/server/lock';
 import { maxScore } from '$lib/games/flappy/engine';
 import { SKINS, isFlyGame, type FlyGame } from '$lib/games/flappy/skins';
 import {
@@ -35,6 +37,11 @@ const GRACE_MS = 4000;
 /** Network allowance when checking a score against the time flown. */
 const LATENCY_MS = 2500;
 const MAX_REPORTED = 9999;
+/**
+ * After the last landing may arrive, wait this long before ranking so landings
+ * that passed their time check just before are saved first.
+ */
+const SETTLE_MS = 1500;
 
 const sessionRef = (db: Firestore, code: string) => doc(db, SESSIONS, code);
 const playerRef = (db: Firestore, code: string, id: string) => doc(db, SESSIONS, code, 'players', id);
@@ -158,7 +165,7 @@ async function finish(db: Firestore, code: string) {
 		return s.status === 'playing' ? timerEndsAt + GRACE_MS : now;
 	});
 	if (closesAt === null) return;
-	const wait = closesAt - Date.now();
+	const wait = closesAt + SETTLE_MS - Date.now();
 	if (wait > 0) await sleep(wait);
 	await writeRanking(db, code);
 }
@@ -211,13 +218,19 @@ export async function join(code: string, rawName: unknown) {
 	const token = randomBytes(24).toString('base64url');
 	const nameRef = doc(db, SESSIONS, code, 'names', sha256(name.toLowerCase()));
 
-	await runTransaction(db, async (tx) => {
-		if ((await tx.get(nameRef)).exists()) error(409, 'That name is already taken in this game. Try another.');
+	// No transaction: this SDK runs them roughly one at a time, so 200 phones
+	// joining together took over a minute. The name check is queued per name
+	// instead, and the write goes out on one of several connections.
+	await withLock(`${code}/name/${nameRef.id}`, async () => {
+		if ((await getDoc(nameRef)).exists()) error(409, 'That name is already taken in this game. Try another.');
 		const player: FlapPlayer = { name, joinedAt: Date.now(), score: 0, scoredAt: null, rounds: 0, flying: false, round: 0, flightStartedAt: null };
 		const state: PrivateState = { tokenHash: sha256(token) };
-		tx.set(nameRef, { playerId: id });
-		tx.set(playerRef(db, code, id), player);
-		tx.set(stateRef(db, code, id), state);
+		const w = await writerDb();
+		const batch = writeBatch(w);
+		batch.set(doc(w, nameRef.path), { playerId: id });
+		batch.set(playerRef(w, code, id), player);
+		batch.set(stateRef(w, code, id), state);
+		await batch.commit();
 	});
 	return { playerId: id, token, name, now: Date.now() };
 }
@@ -230,12 +243,19 @@ export async function play(code: string, body: Record<string, unknown>): Promise
 	if (!['state', 'start', 'end'].includes(action)) error(400, 'Unknown action.');
 	const db = await adminDb();
 
-	const { view, expired } = await runTransaction(db, async (tx) => {
+	// No transaction (see join): read in parallel, then one write on one of
+	// several connections. Only this player writes their own doc during play,
+	// and their requests are queued, so nothing can interleave.
+	const { view, expired } = await withLock(`${code}/${playerId}`, async () => {
 		const [sSnap, stSnap, pSnap] = await Promise.all([
-			tx.get(sessionRef(db, code)),
-			tx.get(stateRef(db, code, playerId)),
-			tx.get(playerRef(db, code, playerId))
+			getDoc(sessionRef(db, code)),
+			getDoc(stateRef(db, code, playerId)),
+			getDoc(playerRef(db, code, playerId))
 		]);
+		const w = await writerDb();
+		const writes: Promise<void>[] = [];
+		/** Queue an update to this player's doc; all are awaited before replying. */
+		const savePlayer = (data: Record<string, unknown>) => writes.push(updateDoc(playerRef(w, code, playerId), data));
 		const s = sessionData(sSnap);
 		const st = stSnap.data() as PrivateState | undefined;
 		const p = pSnap.data() as FlapPlayer | undefined;
@@ -264,7 +284,7 @@ export async function play(code: string, body: Record<string, unknown>): Promise
 				score = 0;
 				rounds = p.rounds + 1;
 				flying = true;
-				tx.update(playerRef(db, code, playerId), { score: 0, scoredAt: null, flying: true, rounds: increment(1), round, flightStartedAt: now });
+				savePlayer({ score: 0, scoredAt: null, flying: true, rounds: increment(1), round, flightStartedAt: now });
 			}
 		} else if (action === 'end') {
 			const r = Number(body.round);
@@ -274,7 +294,7 @@ export async function play(code: string, body: Record<string, unknown>): Promise
 			} else if (now > endsAt + GRACE_MS) {
 				rejected = 'Time was up before this flight landed.';
 				flying = false;
-				tx.update(playerRef(db, code, playerId), { flying: false, flightStartedAt: null });
+				savePlayer({ flying: false, flightStartedAt: null });
 			} else {
 				// Never more than the bird could have scored in the time it flew.
 				const flown = Math.min(now, endsAt + GRACE_MS) - p.flightStartedAt + LATENCY_MS;
@@ -282,12 +302,13 @@ export async function play(code: string, body: Record<string, unknown>): Promise
 				saved = Math.max(0, Math.min(Number.isFinite(reported) ? reported : 0, cap, MAX_REPORTED));
 				score = saved;
 				flying = false;
-				tx.update(playerRef(db, code, playerId), { score: saved, scoredAt: now, flying: false, flightStartedAt: null });
+				savePlayer({ score: saved, scoredAt: now, flying: false, flightStartedAt: null });
 			}
 		}
 
+		await Promise.all(writes);
 		return {
-			view: { now, status: s.status, round, score, rounds, flying, ...(saved !== undefined ? { saved } : {}), ...(rejected ? { rejected } : {}) },
+			view: { now: Date.now(), status: s.status, round, score, rounds, flying, ...(saved !== undefined ? { saved } : {}), ...(rejected ? { rejected } : {}) },
 			// The presenter normally closes the game; this covers it being closed.
 			expired: s.status === 'playing' && now > endsAt + GRACE_MS
 		};
