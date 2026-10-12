@@ -1,5 +1,8 @@
+import type { FlyGame } from './skins';
+
 /**
- * Firestore shapes for a Flappy Bird session. It shares the `liveSessions`
+ * Firestore shapes for a Flappy Bird or Symba Ride session (same game,
+ * different skin). It shares the `liveSessions`
  * collection (and its rules) with Tech Word Rush, told apart by `gameType`.
  *
  *   liveSessions/{code}                 FlapSession — public read, server-only write
@@ -15,8 +18,8 @@
  * player's own doc (start, land).
  */
 
-export const GAME_TYPE = 'flappy';
-export const CODE_RE = /^ZF[A-Z2-9]{4}$/;
+/** ZF… is Flappy Bird, ZS… is Symba Ride. */
+export const CODE_RE = /^Z[FS][A-Z2-9]{4}$/;
 /** Round window lengths the admin can pick, in seconds. */
 export const DURATIONS = [60, 120, 180, 300, 600] as const;
 
@@ -32,7 +35,7 @@ export interface FlapRankEntry {
 
 export interface FlapSession {
 	code: string;
-	gameType: typeof GAME_TYPE;
+	gameType: FlyGame;
 	status: FlapStatus;
 	createdAt: number;
 	createdBy: string;

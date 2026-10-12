@@ -10,9 +10,9 @@ import { BIRD_R, GROUND_Y, PIPE_W, WORLD_H, type World } from './engine';
  * goes 0 → 3 (the game ties it to the score).
  */
 
-type RGB = [number, number, number];
+export type RGB = [number, number, number];
 
-interface Palette {
+export interface Palette {
 	skyTop: RGB;
 	skyMid: RGB;
 	skyLow: RGB;
@@ -31,7 +31,7 @@ interface Palette {
 	night: number;
 }
 
-const hex = (h: string): RGB => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+export const hex = (h: string): RGB => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
 
 const PALETTES: Palette[] = [
 	// Golden hour
@@ -45,10 +45,10 @@ const PALETTES: Palette[] = [
 ];
 
 const mixN = (a: number, b: number, t: number) => a + (b - a) * t;
-const mixC = (a: RGB, b: RGB, t: number): RGB => [mixN(a[0], b[0], t), mixN(a[1], b[1], t), mixN(a[2], b[2], t)];
-const rgb = (c: RGB, a = 1) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
+export const mixC = (a: RGB, b: RGB, t: number): RGB => [mixN(a[0], b[0], t), mixN(a[1], b[1], t), mixN(a[2], b[2], t)];
+export const rgb = (c: RGB, a = 1) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
 
-function palette(theme: number): Palette {
+export function palette(theme: number): Palette {
 	const t = Math.max(0, Math.min(PALETTES.length - 1, theme));
 	const i = Math.min(PALETTES.length - 2, Math.floor(t));
 	const f = t - i;
@@ -64,7 +64,7 @@ function palette(theme: number): Palette {
 }
 
 /** Cheap deterministic hash → [0, 1). */
-const hash = (n: number) => {
+export const hash = (n: number) => {
 	const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
 	return x - Math.floor(x);
 };
@@ -299,84 +299,7 @@ export function createRenderer(canvas: HTMLCanvasElement) {
 
 	// ── Scene layers ─────────────────────────────────────────────────────
 
-	function sky(p: Palette, clock: number) {
-		const g = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
-		g.addColorStop(0, rgb(p.skyTop));
-		g.addColorStop(0.55, rgb(p.skyMid));
-		g.addColorStop(1, rgb(p.skyLow));
-		ctx.fillStyle = g;
-		ctx.fillRect(-20, -20, viewW + 40, WORLD_H + 40);
 
-		if (p.stars > 0.01) {
-			for (const st of STARS) {
-				const a = p.stars * (0.55 + 0.45 * Math.sin(clock * 2.2 + st.p));
-				ctx.fillStyle = `rgba(255,255,240,${a})`;
-				ctx.beginPath();
-				ctx.arc(st.x * viewW, st.y * GROUND_Y, st.r, 0, Math.PI * 2);
-				ctx.fill();
-			}
-		}
-
-		// Sun sinks toward the horizon as the theme advances.
-		if (p.sunA > 0.01) {
-			const sx = viewW * 0.74;
-			const sy = 470 - p.sunH * 380;
-			const glow = ctx.createRadialGradient(sx, sy, 10, sx, sy, 330);
-			glow.addColorStop(0, rgb(p.glow, 0.75 * p.sunA));
-			glow.addColorStop(0.3, rgb(p.glow, 0.25 * p.sunA));
-			glow.addColorStop(1, rgb(p.glow, 0));
-			ctx.fillStyle = glow;
-			ctx.fillRect(sx - 340, sy - 340, 680, 680);
-			ctx.fillStyle = rgb(p.sun, p.sunA);
-			ctx.beginPath();
-			ctx.arc(sx, sy, 40, 0, Math.PI * 2);
-			ctx.fill();
-		}
-		if (p.moonA > 0.01) {
-			const mx = viewW * 0.24;
-			const my = 120;
-			const glow = ctx.createRadialGradient(mx, my, 20, mx, my, 170);
-			glow.addColorStop(0, `rgba(190,205,255,${0.35 * p.moonA})`);
-			glow.addColorStop(1, 'rgba(190,205,255,0)');
-			ctx.fillStyle = glow;
-			ctx.fillRect(mx - 180, my - 180, 360, 360);
-			ctx.fillStyle = `rgba(246,243,226,${p.moonA})`;
-			ctx.beginPath();
-			ctx.arc(mx, my, 27, 0, Math.PI * 2);
-			ctx.fill();
-			ctx.fillStyle = `rgba(200,195,175,${0.5 * p.moonA})`;
-			for (const [dx, dy, r] of [
-				[-8, -6, 5],
-				[7, 4, 6.5],
-				[-4, 11, 3.5],
-				[10, -11, 3]
-			]) {
-				ctx.beginPath();
-				ctx.arc(mx + dx, my + dy, r, 0, Math.PI * 2);
-				ctx.fill();
-			}
-		}
-	}
-
-	function clouds(p: Palette, scroll: number, clock: number, layer: 0 | 1) {
-		const span = viewW + 400;
-		for (const c of CLOUDS) {
-			if ((c.par > 0.1 ? 1 : 0) !== layer) continue;
-			const x = ((((c.x - scroll * c.par - clock * c.drift) % span) + span) % span) - 200;
-			ctx.fillStyle = rgb(mixC(p.cloud, p.skyTop, 0.35), 0.35);
-			for (const [dx, dy, r] of PUFFS) {
-				ctx.beginPath();
-				ctx.arc(x + dx * c.s, c.y + (dy + 7) * c.s, r * c.s, 0, Math.PI * 2);
-				ctx.fill();
-			}
-			ctx.fillStyle = rgb(p.cloud, 0.92);
-			for (const [dx, dy, r] of PUFFS) {
-				ctx.beginPath();
-				ctx.arc(x + dx * c.s, c.y + dy * c.s, r * c.s, 0, Math.PI * 2);
-				ctx.fill();
-			}
-		}
-	}
 
 	function ridge(fn: (x: number) => number, offset: number, top: RGB, base: RGB, minY: number) {
 		const g = ctx.createLinearGradient(0, minY, 0, GROUND_Y);
@@ -428,19 +351,6 @@ export function createRenderer(canvas: HTMLCanvasElement) {
 		}
 	}
 
-	function fireflies(p: Palette, clock: number) {
-		if (p.fireflies < 0.02) return;
-		for (const f of FIREFLIES) {
-			const x = (((f.x * viewW + Math.sin(clock * 0.4 * f.s + f.p) * 40) % viewW) + viewW) % viewW;
-			const y = f.y + Math.sin(clock * 0.9 * f.s + f.p * 2) * 14;
-			const a = p.fireflies * (0.4 + 0.6 * Math.max(0, Math.sin(clock * 2.4 * f.s + f.p)));
-			const g = ctx.createRadialGradient(x, y, 0, x, y, 9);
-			g.addColorStop(0, `rgba(230,255,150,${a})`);
-			g.addColorStop(1, 'rgba(230,255,150,0)');
-			ctx.fillStyle = g;
-			ctx.fillRect(x - 9, y - 9, 18, 18);
-		}
-	}
 
 	function leaf(x: number, y: number, dir: 1 | -1, size: number, angle: number) {
 		ctx.save();
@@ -641,43 +551,6 @@ export function createRenderer(canvas: HTMLCanvasElement) {
 		ctx.restore();
 	}
 
-	function particles(list: Particle[]) {
-		for (const p of list) {
-			const a = Math.max(0, p.life / p.ttl);
-			if (p.kind === 'puff' || p.kind === 'dust') {
-				ctx.fillStyle = p.kind === 'puff' ? `rgba(255,255,255,${a * 0.55})` : `rgba(140,110,70,${a * 0.5})`;
-				ctx.beginPath();
-				ctx.arc(p.x, p.y, p.size * (1.6 - a * 0.6), 0, Math.PI * 2);
-				ctx.fill();
-			} else if (p.kind === 'feather') {
-				ctx.save();
-				ctx.translate(p.x, p.y);
-				ctx.rotate(p.rot);
-				ctx.globalAlpha = Math.min(1, a * 1.6);
-				ctx.fillStyle = p.color;
-				ctx.beginPath();
-				ctx.ellipse(0, 0, p.size, p.size * 0.38, 0, 0, Math.PI * 2);
-				ctx.fill();
-				ctx.restore();
-			} else {
-				ctx.save();
-				ctx.translate(p.x, p.y);
-				ctx.rotate(p.rot);
-				ctx.globalAlpha = a;
-				ctx.fillStyle = p.color;
-				const r = p.size;
-				ctx.beginPath();
-				ctx.moveTo(0, -r);
-				ctx.quadraticCurveTo(0, 0, r, 0);
-				ctx.quadraticCurveTo(0, 0, 0, r);
-				ctx.quadraticCurveTo(0, 0, -r, 0);
-				ctx.quadraticCurveTo(0, 0, 0, -r);
-				ctx.fill();
-				ctx.restore();
-			}
-		}
-		ctx.globalAlpha = 1;
-	}
 
 	function draw(f: Frame) {
 		const p = palette(f.theme);
@@ -685,8 +558,8 @@ export function createRenderer(canvas: HTMLCanvasElement) {
 		const shakeY = f.shake ? (Math.random() - 0.5) * 14 * f.shake * dpr : 0;
 		ctx.setTransform(px, 0, 0, px, shakeX, shakeY);
 
-		sky(p, f.clock);
-		clouds(p, f.scroll, f.clock, 0);
+		drawSky(ctx, viewW, p, f.clock);
+		drawClouds(ctx, viewW, p, f.scroll, f.clock, 0);
 		ridge(farY, f.scroll * 0.06, p.far, mixC(p.far, p.skyLow, 0.55), 280);
 		// Atmospheric haze between ridges
 		const haze = ctx.createLinearGradient(0, 380, 0, GROUND_Y);
@@ -695,10 +568,10 @@ export function createRenderer(canvas: HTMLCanvasElement) {
 		ctx.fillStyle = haze;
 		ctx.fillRect(-20, 380, viewW + 40, GROUND_Y - 380);
 		ridge(nearY, f.scroll * 0.14, p.near, mixC(p.near, p.skyLow, 0.35), 400);
-		clouds(p, f.scroll, f.clock, 1);
+		drawClouds(ctx, viewW, p, f.scroll, f.clock, 1);
 		ridge(hillY, f.scroll * 0.35, p.hill, mixC(p.hill, p.tree, 0.5), 540);
 		trees(p, f.scroll * 0.35);
-		fireflies(p, f.clock);
+		drawFireflies(ctx, viewW, p, f.clock);
 
 		pipes(f.world, f.distance);
 		groundStrip(f.scroll, shakeX, shakeY);
@@ -709,7 +582,7 @@ export function createRenderer(canvas: HTMLCanvasElement) {
 		}
 
 		bird(f);
-		particles(f.particles);
+		drawParticles(ctx, f.particles);
 
 		if (f.flash > 0.01) {
 			ctx.fillStyle = `rgba(255,255,255,${f.flash * 0.7})`;
@@ -738,7 +611,7 @@ export function createRenderer(canvas: HTMLCanvasElement) {
 	};
 }
 
-function roundRect(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+export function roundRect(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
 	g.beginPath();
 	g.moveTo(x + r, y);
 	g.arcTo(x + w, y, x + w, y + h, r);
@@ -751,3 +624,137 @@ function roundRect(g: CanvasRenderingContext2D, x: number, y: number, w: number,
 function mixHex(a: string, b: string, t: number) {
 	return rgb(mixC(hex(a), hex(b), t));
 }
+
+// ── Shared scene pieces (also used by the Symba Ride city) ──────────────────
+
+export function drawSky(ctx: CanvasRenderingContext2D, viewW: number, p: Palette, clock: number) {
+	const g = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
+	g.addColorStop(0, rgb(p.skyTop));
+	g.addColorStop(0.55, rgb(p.skyMid));
+	g.addColorStop(1, rgb(p.skyLow));
+	ctx.fillStyle = g;
+	ctx.fillRect(-20, -20, viewW + 40, WORLD_H + 40);
+
+	if (p.stars > 0.01) {
+		for (const st of STARS) {
+			const a = p.stars * (0.55 + 0.45 * Math.sin(clock * 2.2 + st.p));
+			ctx.fillStyle = `rgba(255,255,240,${a})`;
+			ctx.beginPath();
+			ctx.arc(st.x * viewW, st.y * GROUND_Y, st.r, 0, Math.PI * 2);
+			ctx.fill();
+		}
+	}
+
+	// Sun sinks toward the horizon as the theme advances.
+	if (p.sunA > 0.01) {
+		const sx = viewW * 0.74;
+		const sy = 470 - p.sunH * 380;
+		const glow = ctx.createRadialGradient(sx, sy, 10, sx, sy, 330);
+		glow.addColorStop(0, rgb(p.glow, 0.75 * p.sunA));
+		glow.addColorStop(0.3, rgb(p.glow, 0.25 * p.sunA));
+		glow.addColorStop(1, rgb(p.glow, 0));
+		ctx.fillStyle = glow;
+		ctx.fillRect(sx - 340, sy - 340, 680, 680);
+		ctx.fillStyle = rgb(p.sun, p.sunA);
+		ctx.beginPath();
+		ctx.arc(sx, sy, 40, 0, Math.PI * 2);
+		ctx.fill();
+	}
+	if (p.moonA > 0.01) {
+		const mx = viewW * 0.24;
+		const my = 120;
+		const glow = ctx.createRadialGradient(mx, my, 20, mx, my, 170);
+		glow.addColorStop(0, `rgba(190,205,255,${0.35 * p.moonA})`);
+		glow.addColorStop(1, 'rgba(190,205,255,0)');
+		ctx.fillStyle = glow;
+		ctx.fillRect(mx - 180, my - 180, 360, 360);
+		ctx.fillStyle = `rgba(246,243,226,${p.moonA})`;
+		ctx.beginPath();
+		ctx.arc(mx, my, 27, 0, Math.PI * 2);
+		ctx.fill();
+		ctx.fillStyle = `rgba(200,195,175,${0.5 * p.moonA})`;
+		for (const [dx, dy, r] of [
+			[-8, -6, 5],
+			[7, 4, 6.5],
+			[-4, 11, 3.5],
+			[10, -11, 3]
+		]) {
+			ctx.beginPath();
+			ctx.arc(mx + dx, my + dy, r, 0, Math.PI * 2);
+			ctx.fill();
+		}
+	}
+}
+
+export function drawClouds(ctx: CanvasRenderingContext2D, viewW: number, p: Palette, scroll: number, clock: number, layer: 0 | 1) {
+	const span = viewW + 400;
+	for (const c of CLOUDS) {
+		if ((c.par > 0.1 ? 1 : 0) !== layer) continue;
+		const x = ((((c.x - scroll * c.par - clock * c.drift) % span) + span) % span) - 200;
+		ctx.fillStyle = rgb(mixC(p.cloud, p.skyTop, 0.35), 0.35);
+		for (const [dx, dy, r] of PUFFS) {
+			ctx.beginPath();
+			ctx.arc(x + dx * c.s, c.y + (dy + 7) * c.s, r * c.s, 0, Math.PI * 2);
+			ctx.fill();
+		}
+		ctx.fillStyle = rgb(p.cloud, 0.92);
+		for (const [dx, dy, r] of PUFFS) {
+			ctx.beginPath();
+			ctx.arc(x + dx * c.s, c.y + dy * c.s, r * c.s, 0, Math.PI * 2);
+			ctx.fill();
+		}
+	}
+}
+
+export function drawFireflies(ctx: CanvasRenderingContext2D, viewW: number, p: Palette, clock: number) {
+	if (p.fireflies < 0.02) return;
+	for (const f of FIREFLIES) {
+		const x = (((f.x * viewW + Math.sin(clock * 0.4 * f.s + f.p) * 40) % viewW) + viewW) % viewW;
+		const y = f.y + Math.sin(clock * 0.9 * f.s + f.p * 2) * 14;
+		const a = p.fireflies * (0.4 + 0.6 * Math.max(0, Math.sin(clock * 2.4 * f.s + f.p)));
+		const g = ctx.createRadialGradient(x, y, 0, x, y, 9);
+		g.addColorStop(0, `rgba(230,255,150,${a})`);
+		g.addColorStop(1, 'rgba(230,255,150,0)');
+		ctx.fillStyle = g;
+		ctx.fillRect(x - 9, y - 9, 18, 18);
+	}
+}
+
+export function drawParticles(ctx: CanvasRenderingContext2D, list: Particle[]) {
+	for (const p of list) {
+		const a = Math.max(0, p.life / p.ttl);
+		if (p.kind === 'puff' || p.kind === 'dust') {
+			ctx.fillStyle = p.kind === 'puff' ? `rgba(255,255,255,${a * 0.55})` : `rgba(140,110,70,${a * 0.5})`;
+			ctx.beginPath();
+			ctx.arc(p.x, p.y, p.size * (1.6 - a * 0.6), 0, Math.PI * 2);
+			ctx.fill();
+		} else if (p.kind === 'feather') {
+			ctx.save();
+			ctx.translate(p.x, p.y);
+			ctx.rotate(p.rot);
+			ctx.globalAlpha = Math.min(1, a * 1.6);
+			ctx.fillStyle = p.color;
+			ctx.beginPath();
+			ctx.ellipse(0, 0, p.size, p.size * 0.38, 0, 0, Math.PI * 2);
+			ctx.fill();
+			ctx.restore();
+		} else {
+			ctx.save();
+			ctx.translate(p.x, p.y);
+			ctx.rotate(p.rot);
+			ctx.globalAlpha = a;
+			ctx.fillStyle = p.color;
+			const r = p.size;
+			ctx.beginPath();
+			ctx.moveTo(0, -r);
+			ctx.quadraticCurveTo(0, 0, r, 0);
+			ctx.quadraticCurveTo(0, 0, 0, r);
+			ctx.quadraticCurveTo(0, 0, -r, 0);
+			ctx.quadraticCurveTo(0, 0, 0, -r);
+			ctx.fill();
+			ctx.restore();
+		}
+	}
+	ctx.globalAlpha = 1;
+}
+

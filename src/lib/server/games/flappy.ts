@@ -14,10 +14,10 @@ import {
 } from 'firebase/firestore';
 import { adminDb } from '$lib/server/admin-session';
 import { maxScore } from '$lib/games/flappy/engine';
+import { SKINS, isFlyGame, type FlyGame } from '$lib/games/flappy/skins';
 import {
 	CODE_RE,
 	DURATIONS,
-	GAME_TYPE,
 	type FlapAction,
 	type FlapControl,
 	type FlapPlayer,
@@ -75,26 +75,27 @@ export async function readBody(request: Request): Promise<Record<string, unknown
 
 const sessionData = (snap: DocumentSnapshot) => {
 	const s = snap.data() as FlapSession | undefined;
-	if (!snap.exists() || s?.gameType !== GAME_TYPE) error(404, 'This game session no longer exists.');
+	if (!snap.exists() || !isFlyGame(s?.gameType)) error(404, 'This game session no longer exists.');
 	return s;
 };
 
 // ── Sessions (admin) ─────────────────────────────────────────────────────
 
-function newCode() {
-	let s = 'ZF';
+function newCode(game: FlyGame) {
+	let s: string = SKINS[game].codePrefix;
 	for (let i = 0; i < 4; i++) s += CODE_ALPHABET[randomInt(CODE_ALPHABET.length)];
 	return s;
 }
 
-export async function createSession(createdBy: string, duration: number): Promise<{ code: string }> {
+export async function createSession(createdBy: string, duration: number, game: unknown = 'flappy'): Promise<{ code: string }> {
 	if (!DURATIONS.includes(duration as never)) error(400, 'Choose a valid game length.');
+	if (!isFlyGame(game)) error(400, 'Unknown game.');
 	const db = await adminDb();
 	for (let attempt = 0; attempt < 6; attempt++) {
-		const code = newCode();
+		const code = newCode(game);
 		const session: FlapSession = {
 			code,
-			gameType: GAME_TYPE,
+			gameType: game,
 			status: 'lobby',
 			createdAt: Date.now(),
 			createdBy,

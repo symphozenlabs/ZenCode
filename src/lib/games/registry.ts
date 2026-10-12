@@ -31,6 +31,14 @@ export const GAMES: GameDefinition[] = [
 		description: 'An ice breaker for the whole room. Players fly as often as they like until time runs out — each new flight replaces their last score, so only the latest counts.',
 		tags: ['Ice breaker', 'Arcade', 'Timed'],
 		presenterHref: (code) => `/admin/games/flappy/live/${code}`
+	},
+	{
+		id: 'symba',
+		name: 'Symba Ride',
+		tagline: 'Jetpack Symba through India’s skyline.',
+		description: 'Our mascot Symba jetpacks between skyscrapers and Indian landmarks. Same rules as Flappy Bird — fly as often as you like, only your latest flight counts — and a roar at every 10 points.',
+		tags: ['Ice breaker', 'Mascot', 'Timed'],
+		presenterHref: (code) => `/admin/games/flappy/live/${code}`
 	}
 ];
 
