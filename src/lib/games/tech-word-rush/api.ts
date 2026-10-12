@@ -51,8 +51,9 @@ export const serverNow = () => Date.now() + clockOffset;
 export const createSession = (token: string, duration: number, questions?: WordQuestion[]) =>
 	post<{ code: string; source: string }>(BASE, { duration, ...(questions ? { questions } : {}) }, token);
 
-export async function control(token: string, code: string, action: ControlAction) {
-	return post<{ now: number }>(`${BASE}/${code}/control`, { action }, token);
+/** `index`: for 'end', the word being revealed (a stale reveal is then ignored). */
+export async function control(token: string, code: string, action: ControlAction, index?: number) {
+	return post<{ now: number }>(`${BASE}/${code}/control`, { action, ...(index !== undefined ? { index } : {}) }, token);
 }
 
 // Participant ────────────────────────────────────────────────────────────

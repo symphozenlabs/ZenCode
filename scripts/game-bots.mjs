@@ -267,6 +267,9 @@ async function checkReveal(bot, index, answer) {
 
 	await wait(rand(0, 3000)); // phones don't all ask at once
 	const v = await act(bot, { action: 'state' });
+	// The host may already have started the next word; the reply then describes
+	// that word (and any hint spent on it), so there is nothing to compare.
+	if (v?.q && v.q.index !== index) return;
 	if (v && v.q && v.q.status !== status) problem(`${bot.name}: expected "${status}" on word ${index + 1}, server said "${v.q.status}"`);
 	if (v && v.xp !== bot.expectedXp) problem(`${bot.name}: expected ${bot.expectedXp} XP after word ${index + 1}, server said ${v.xp}`);
 	if (v) bot.expectedXp = v.xp; // re-sync so one slip isn't reported every word
@@ -415,7 +418,7 @@ function report(s, landed) {
   Top 5
 ${top.join('\n') || '     (empty)'}
 
-  ${problems.length ? `❌ ${problems.length} problem(s) found${problems.length > 15 ? ' (first 15 shown above)' : ''}` : '✅ Everything matched: scores, statuses, ranking and winner.'}
+  ${problems.length ? `❌ ${problems.length} problem(s) found:\n${problems.map((p) => `     - ${p}`).join('\n')}` : '✅ Everything matched: scores, statuses, ranking and winner.'}
 `);
 }
 

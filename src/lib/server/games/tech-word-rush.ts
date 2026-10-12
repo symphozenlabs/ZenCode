@@ -13,6 +13,7 @@ import {
 	type Firestore
 } from 'firebase/firestore';
 import { adminDb, writerDb } from '$lib/server/admin-session';
+import { withLock } from '$lib/server/lock';
 import {
 	MAX_GUESSES,
 	applyGuess,
@@ -284,7 +285,12 @@ async function settleStragglers(db: Firestore, code: string, s: LiveSession) {
 	if (late) await settleAndRank(db, code, false);
 }
 
-export async function control(code: string, action: ControlAction): Promise<{ now: number }> {
+/**
+ * `index` (optional, used by 'end'): the word the caller means to reveal. A
+ * reveal that arrives after the host has moved on — a retry or a second
+ * presenter tab — is ignored instead of cutting the new word short.
+ */
+export async function control(code: string, action: ControlAction, index?: number): Promise<{ now: number }> {
 	const actions: ControlAction[] = ['sync', 'start', 'next', 'end', 'leaderboard', 'finish'];
 	if (!actions.includes(action)) error(400, 'Unknown action.');
 	const db = await adminDb();
@@ -348,6 +354,7 @@ export async function control(code: string, action: ControlAction): Promise<{ no
 				return false;
 			}
 			case 'end':
+				if (index !== undefined && index !== s.questionIndex) return false; // aimed at an earlier word
 				if (s.status !== 'question') return s.status === 'result' && retryRanking();
 				tx.update(ref, { status: 'result', answer: words[s.questionIndex].word, timerEndsAt: null, ranking: true, rankingAt: now });
 				return true;
@@ -558,13 +565,4 @@ export async function play(code: string, body: Record<string, unknown>): Promise
 			...(result ? { result } : {})
 		};
 	});
-}
-
-/** Run `fn` after any earlier call with the same key has finished (per server process). */
-const locks = new Map<string, Promise<unknown>>();
-function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
-	const run = (locks.get(key) ?? Promise.resolve()).catch(() => {}).then(fn);
-	locks.set(key, run);
-	run.finally(() => locks.get(key) === run && locks.delete(key)).catch(() => {});
-	return run;
 }

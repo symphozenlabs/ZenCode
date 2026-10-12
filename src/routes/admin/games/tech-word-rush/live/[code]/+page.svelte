@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { untrack } from 'svelte';
 	import { collection, doc, onSnapshot } from 'firebase/firestore';
 	import { fade, fly, scale } from 'svelte/transition';
 	import { Users, X, Maximize, Minimize, Play, Eye, ListOrdered, SkipForward, Flag, Trophy, CloudOff, ArrowLeft } from '@lucide/svelte';
@@ -59,7 +60,7 @@
 		try {
 			const token = await adminAuth.user?.getIdToken();
 			if (!token) throw new Error('Your session expired. Sign in again.');
-			await control(token, code, action);
+			await control(token, code, action, action === 'end' ? index : undefined);
 		} catch (err) {
 			actionError = (err as Error).message || 'Unable to update the game.';
 		} finally {
@@ -99,11 +100,12 @@
 	// Reveal the answer the moment time runs out, and keep retrying until the
 	// server confirms. A one-shot call was lost when another action was in
 	// flight, the request failed, or a background tab's timers were throttled.
-	// The server ignores duplicate ends.
+	// The server ignores duplicate ends, and ends aimed at an earlier word.
 	const deadline = $derived(session?.status === 'question' ? session.timerEndsAt : null);
 	$effect(() => {
 		const end = deadline;
 		if (!end) return;
+		const word = untrack(() => index);
 		let stopped = false;
 		let timer: ReturnType<typeof setTimeout>;
 		const attempt = async () => {
@@ -115,7 +117,7 @@
 			}
 			try {
 				const token = await adminAuth.user?.getIdToken();
-				if (token && !stopped) await control(token, code, 'end');
+				if (token && !stopped) await control(token, code, 'end', word);
 			} catch (err) {
 				if (!stopped) actionError = (err as Error).message || 'Unable to reveal the answer. Retrying…';
 			}
@@ -133,7 +135,9 @@
 	// scores…" would never clear. Once its lease runs out, ask again; the server
 	// only re-scores a run that is really dead, and skips anyone already paid.
 	const stuckRanking = $derived(
-		session?.ranking && (status === 'result' || status === 'finished') ? { at: session.rankingAt ?? 0, action: status === 'result' ? 'end' : 'finish' } : null
+		session?.ranking && (status === 'result' || status === 'finished')
+			? { at: session.rankingAt ?? 0, action: status === 'result' ? 'end' : 'finish', index }
+			: null
 	);
 	$effect(() => {
 		const r = stuckRanking;
@@ -142,7 +146,7 @@
 		const retry = async () => {
 			try {
 				const token = await adminAuth.user?.getIdToken();
-				if (token) await control(token, code, r.action as ControlAction);
+				if (token) await control(token, code, r.action as ControlAction, r.action === 'end' ? r.index : undefined);
 			} catch {
 				/* tried again below */
 			}
