@@ -86,14 +86,14 @@ function ensureEnvLoaded() {
  * @param {string} key
  * @returns {string}
  */
-function getServerEnv(key) {
+export function getServerEnv(key) {
   ensureEnvLoaded();
   const proc = typeof process !== 'undefined' && process.env ? process.env[key] : '';
   const meta = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env[key] : '';
   return parseEnvValue(proc || meta || '');
 }
 
-function getResendApiKeyConfigError(apiKey) {
+export function getResendApiKeyConfigError(apiKey) {
   if (!apiKey) return 'RESEND_API_KEY missing from environment';
 
   if (isPlaceholderEnvValue(apiKey)) {
@@ -111,7 +111,7 @@ function getResendApiKeyConfigError(apiKey) {
   return '';
 }
 
-function getResendErrorMessage(error) {
+export function getResendErrorMessage(error) {
   const originalMessage = error?.message || JSON.stringify(error);
   const statusCode = error?.statusCode || error?.status;
 
@@ -175,7 +175,7 @@ function isRetryable(error) {
 }
 
 /** Send one email, retrying rate limits and transient failures with backoff. */
-async function sendWithRetry(resend, payload) {
+export async function sendWithRetry(resend, payload) {
   let last = null;
   let attempt = 0;
   while (attempt < MAX_SEND_ATTEMPTS) {
@@ -194,7 +194,7 @@ async function sendWithRetry(resend, payload) {
   return { response: { data: null, error: last }, attempts: attempt };
 }
 
-function sanitizeAttachmentName(value) {
+export function sanitizeAttachmentName(value) {
   return String(value || '')
     .trim()
     .replace(/[^A-Za-z0-9_-]+/g, '-')
@@ -209,7 +209,7 @@ function sanitizeAttachmentName(value) {
  * @param {string} rawSender
  * @returns {{ sender: string, warning?: string }}
  */
-function getSanitizedSender(rawSender) {
+export function getSanitizedSender(rawSender) {
   const defaultSender = 'ZEN CODE 2026 <onboarding@resend.dev>';
   if (!rawSender || !rawSender.trim()) {
     return { sender: defaultSender };
