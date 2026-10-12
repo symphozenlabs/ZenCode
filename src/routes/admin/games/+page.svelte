@@ -4,10 +4,12 @@
 	import { Play, ListChecks, Radio, History, Trophy, Users, CloudOff, Gamepad2, TriangleAlert, ArrowRight } from '@lucide/svelte';
 	import { db } from '$lib/firebase/client';
 	import { adminAuth } from '$lib/stores/admin-auth.svelte';
-	import { GAMES, gameName } from '$lib/games/registry';
+	import { GAMES, gameName, presenterHref } from '$lib/games/registry';
 	import { SESSIONS, type LiveSession } from '$lib/games/tech-word-rush/types';
 	import { QUESTIONS_PER_GAME } from '$lib/games/tech-word-rush/questions';
 	import { createSession } from '$lib/games/tech-word-rush/api';
+	import { createSession as createFlappySession } from '$lib/games/flappy/api';
+	import { DURATIONS as FLAP_DURATIONS, durationLabel, type FlapSession } from '$lib/games/flappy/types';
 	import { formatTimestamp } from '$lib/utils/format';
 	import PageHeader from '$lib/components/admin/PageHeader.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -19,7 +21,8 @@
 	import GradientOrb from '$lib/components/motion/GradientOrb.svelte';
 	import SessionStatusBadge from '$lib/components/games/SessionStatusBadge.svelte';
 
-	let sessions = $state<LiveSession[]>([]);
+	type AnySession = LiveSession | FlapSession;
+	let sessions = $state<AnySession[]>([]);
 	let status = $state<'loading' | 'ready' | 'error'>('loading');
 	let attempt = $state(0);
 
@@ -30,7 +33,7 @@
 		return onSnapshot(
 			q,
 			(snap) => {
-				sessions = snap.docs.map((d) => d.data() as LiveSession);
+				sessions = snap.docs.map((d) => d.data() as AnySession);
 				status = 'ready';
 			},
 			(err) => {
@@ -53,10 +56,17 @@
 	});
 
 	// Start a live game
-	let startOpen = $state(false);
+	let startFor = $state<string | null>(null);
+	const startOpen = $derived(startFor !== null);
 	let duration = $state('45');
+	let flapDuration = $state('180');
 	let creating = $state(false);
 	let createError = $state('');
+
+	function openStart(id: string) {
+		startFor = id;
+		createError = '';
+	}
 
 	async function start() {
 		creating = true;
@@ -64,8 +74,13 @@
 		try {
 			const token = await adminAuth.user?.getIdToken();
 			if (!token) throw new Error('Your session expired. Sign in again.');
-			const { code } = await createSession(token, Number(duration));
-			await goto(`/admin/games/tech-word-rush/live/${code}`);
+			if (startFor === 'flappy') {
+				const { code } = await createFlappySession(token, Number(flapDuration));
+				await goto(presenterHref('flappy', code));
+			} else {
+				const { code } = await createSession(token, Number(duration));
+				await goto(presenterHref('tech-word-rush', code));
+			}
 		} catch (err) {
 			createError = (err as Error).message || 'Unable to create the game.';
 			creating = false;
@@ -100,6 +115,29 @@
 					<div class="relative flex h-full flex-col justify-between">
 						<p class="eyebrow text-green-300/80">Live game</p>
 						<div>
+							{#if game.id === 'flappy'}
+								<svg viewBox="0 0 160 70" class="absolute -top-1 right-0 h-28 w-auto" aria-hidden="true">
+									<defs>
+										<linearGradient id="bamboo-art" x1="0" x2="1">
+											<stop offset="0" stop-color="#21461a" /><stop offset="0.3" stop-color="#9fd06a" /><stop offset="0.5" stop-color="#86bd4f" /><stop offset="1" stop-color="#1d3f16" />
+										</linearGradient>
+										<radialGradient id="bird-art" cx="0.35" cy="0.3"><stop offset="0" stop-color="#fff6c2" /><stop offset="0.5" stop-color="#ffd34e" /><stop offset="1" stop-color="#ee9b22" /></radialGradient>
+									</defs>
+									<rect x="96" y="-10" width="22" height="30" fill="url(#bamboo-art)" /><rect x="93" y="16" width="28" height="7" rx="2" fill="url(#bamboo-art)" />
+									<rect x="96" y="56" width="22" height="30" fill="url(#bamboo-art)" /><rect x="93" y="52" width="28" height="7" rx="2" fill="url(#bamboo-art)" />
+									<rect x="136" y="-10" width="22" height="18" fill="url(#bamboo-art)" /><rect x="133" y="5" width="28" height="7" rx="2" fill="url(#bamboo-art)" />
+									<rect x="136" y="44" width="22" height="40" fill="url(#bamboo-art)" /><rect x="133" y="40" width="28" height="7" rx="2" fill="url(#bamboo-art)" />
+									<g transform="translate(62 38) rotate(-12)">
+										<g class="transition-transform duration-500 group-hover:-translate-y-1.5">
+											<path d="M-7 -1 L-14 -5 L-12 0 L-14 4 L-6 3Z" fill="#d9822a" />
+											<ellipse rx="10" ry="8" fill="url(#bird-art)" stroke="#6e3708" stroke-opacity="0.6" />
+											<ellipse cx="-3" cy="1" rx="6" ry="3.6" fill="#f2a43a" stroke="#6e3708" stroke-opacity="0.5" />
+											<circle cx="4.5" cy="-3" r="3.4" fill="#fff" /><circle cx="5.6" cy="-2.8" r="1.6" fill="#18181b" />
+											<path d="M6 -0.5 L13 1 L6 3Z" fill="#ff7b2e" />
+										</g>
+									</g>
+								</svg>
+							{:else}
 							<div class="mb-3 flex gap-1" aria-hidden="true">
 								{#each ['P', '', '', '', '', 'N'] as ch, i (i)}
 									<span
@@ -109,6 +147,7 @@
 									>
 								{/each}
 							</div>
+							{/if}
 							<h2 class="font-display text-2xl font-bold tracking-tight uppercase">{game.name}</h2>
 							<p class="mt-0.5 text-sm text-sun">{game.tagline}</p>
 						</div>
@@ -122,10 +161,12 @@
 						{/each}
 					</ul>
 					<div class="mt-auto flex flex-wrap gap-2 pt-5">
-						<Button onclick={() => ((startOpen = true), (createError = ''))} disabled={server?.ready === false}>
+						<Button onclick={() => openStart(game.id)} disabled={server?.ready === false}>
 							<Play class="size-4" /> Start live game
 						</Button>
-						<Button variant="outline" href={game.manageHref}><ListChecks class="size-4" /> Question bank</Button>
+						{#if game.manageHref}
+							<Button variant="outline" href={game.manageHref}><ListChecks class="size-4" /> Question bank</Button>
+						{/if}
 					</div>
 				</div>
 			</article>
@@ -166,9 +207,13 @@
 						<SessionStatusBadge status={s.status} />
 						<span class="inline-flex items-center gap-1 text-xs text-muted-foreground tabular"><Users class="size-3.5" />{s.playerCount}</span>
 						<span class="text-xs text-muted-foreground tabular">
-							{s.questionIndex < 0 ? 'Not started' : `Word ${s.questionIndex + 1} / ${s.totalQuestions}`}
+							{#if s.gameType === 'flappy'}
+								{s.status === 'lobby' ? `${durationLabel(s.duration)} window` : 'Flights live'}
+							{:else}
+								{s.questionIndex < 0 ? 'Not started' : `Word ${s.questionIndex + 1} / ${s.totalQuestions}`}
+							{/if}
 						</span>
-						<Button size="sm" variant="outline" class="ml-auto" href="/admin/games/tech-word-rush/live/{s.code}">
+						<Button size="sm" variant="outline" class="ml-auto" href={presenterHref(s.gameType, s.code)}>
 							Open presenter <ArrowRight class="size-3.5" />
 						</Button>
 					</li>
@@ -196,7 +241,7 @@
 				{#each history as s (s.code)}
 					<li>
 						<a
-							href="/admin/games/tech-word-rush/live/{s.code}"
+							href={presenterHref(s.gameType, s.code)}
 							class="grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-0.5 px-4 py-3 text-sm transition-colors duration-150 hover:bg-muted/60 sm:grid-cols-[7rem_1fr_5rem_auto]"
 						>
 							<span class="font-mono font-semibold tracking-wider">{s.code}</span>
@@ -204,7 +249,9 @@
 								{#if s.winner}
 									<Trophy class="size-3.5 shrink-0 text-sun" />
 									<span class="truncate font-medium text-foreground">{s.winner.name}</span>
-									<span class="text-xs tabular">{s.winner.xp.toLocaleString('en-IN')} XP</span>
+									<span class="text-xs tabular">
+										{'score' in s.winner ? `${s.winner.score.toLocaleString('en-IN')} pts` : `${s.winner.xp.toLocaleString('en-IN')} XP`}
+									</span>
 								{:else}
 									<span class="text-xs">No players</span>
 								{/if}
@@ -219,7 +266,24 @@
 	</section>
 </div>
 
-<Modal open={startOpen} title="Start Tech Word Rush" description="Opens a lobby with a QR code for players to join." onclose={() => !creating && (startOpen = false)}>
+<Modal
+	open={startOpen}
+	title={startFor === 'flappy' ? 'Start Flappy Bird' : 'Start Tech Word Rush'}
+	description="Opens a lobby with a QR code for players to join."
+	onclose={() => !creating && (startFor = null)}
+>
+	{#if startFor === 'flappy'}
+		<div class="space-y-4">
+			<SelectField label="Game length" bind:value={flapDuration} options={FLAP_DURATIONS.map((d) => ({ value: String(d), label: durationLabel(d) }))} />
+			<ul class="space-y-1.5 text-[13px] text-muted-foreground">
+				<li>• Players can practise in the lobby while they wait.</li>
+				<li>• Once you start, they fly as many times as they like until time runs out.</li>
+				<li>• Each new flight <span class="font-medium text-foreground">replaces</span> their previous score — only the latest counts.</li>
+				<li>• The final leaderboard appears when the timer ends.</li>
+			</ul>
+			{#if createError}<p class="text-[13px] text-destructive" role="alert">{createError}</p>{/if}
+		</div>
+	{:else}
 	<div class="space-y-4">
 		<SelectField
 			label="Time per word"
@@ -244,8 +308,9 @@
 		<p class="text-[13px] text-muted-foreground">Words are picked at random from the question bank and ordered easy to hard.</p>
 		{#if createError}<p class="text-[13px] text-destructive" role="alert">{createError}</p>{/if}
 	</div>
+	{/if}
 	{#snippet footer()}
-		<Button variant="ghost" onclick={() => (startOpen = false)} disabled={creating}>Cancel</Button>
+		<Button variant="ghost" onclick={() => (startFor = null)} disabled={creating}>Cancel</Button>
 		<Button onclick={start} loading={creating}>{creating ? 'Creating game…' : 'Create lobby'}</Button>
 	{/snippet}
 </Modal>

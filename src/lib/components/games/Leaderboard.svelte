@@ -10,8 +10,10 @@
 		limit?: number;
 		highlightId?: string | null;
 		size?: 'md' | 'lg';
+		/** Label after each score. */
+		unit?: string;
 	}
-	let { entries, limit = 10, highlightId = null, size = 'md' }: Props = $props();
+	let { entries, limit = 10, highlightId = null, size = 'md', unit = 'XP' }: Props = $props();
 
 	const rows = $derived(entries.slice(0, limit));
 	const pad = (n: number) => String(n).padStart(2, '0');
@@ -38,7 +40,7 @@
 			</span>
 			<span class="font-display font-bold whitespace-nowrap text-cream">
 				<XpCounter value={e.xp} />
-				<span class="text-[0.7em] font-medium text-cream/50">XP</span>
+				<span class="text-[0.7em] font-medium text-cream/50">{unit}</span>
 			</span>
 		</li>
 	{/each}

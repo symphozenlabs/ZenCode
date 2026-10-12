@@ -13,6 +13,7 @@
 	// admin check below).
 	const isPresenter = $derived(
 		page.url.pathname.startsWith('/admin/games/tech-word-rush/live/') ||
+			page.url.pathname.startsWith('/admin/games/flappy/live/') ||
 			/^\/admin\/live\/[^/]+\/present\/?$/.test(page.url.pathname) ||
 			page.url.pathname === '/admin/certificates/print'
 	);
