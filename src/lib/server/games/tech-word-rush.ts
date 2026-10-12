@@ -12,14 +12,13 @@ import {
 	type DocumentSnapshot,
 	type Firestore
 } from 'firebase/firestore';
-import { adminDb } from '$lib/server/admin-session';
+import { adminDb, writerDb } from '$lib/server/admin-session';
 import {
 	MAX_GUESSES,
 	applyGuess,
 	applyHint,
 	applySkip,
 	freshQuestion,
-	isValidWord,
 	rankPlayers,
 	settle,
 	type Outcome,
@@ -27,16 +26,17 @@ import {
 	type RankInput
 } from '$lib/games/tech-word-rush/engine';
 import {
-	CATEGORIES,
 	DEFAULT_QUESTIONS,
-	DIFFICULTIES,
 	QUESTIONS_PER_GAME,
+	parseQuestion,
+	parseQuestionSet,
 	pickQuestions,
 	type WordQuestion
 } from '$lib/games/tech-word-rush/questions';
 import {
 	GAME_TYPE,
 	QUESTIONS_COLLECTION,
+	RANKING_LEASE_MS,
 	SESSIONS,
 	type ControlAction,
 	type LiveSession,
@@ -50,9 +50,18 @@ const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no I, L, O, 0, 1
 const CODE_PATTERN = /^ZC[A-Z2-9]{4}$/;
 const MAX_PLAYERS = 300;
 const NAME_MAX = 20;
-/** Network allowance after the timer reaches zero. */
-const GRACE_MS = 1500;
-export const DURATIONS = [30, 45, 60, 90] as const;
+/**
+ * How long after the timer hits zero a request is still accepted. Zero: the
+ * server's clock is the referee, so nothing lands once the countdown ends.
+ */
+const GRACE_MS = 0;
+/**
+ * Wait after the reveal before scoring, so answers that passed their session
+ * check just before it have time to save. Anything slower is caught by the
+ * catch-up pass before the next word (see control 'next').
+ */
+const SETTLE_DELAY_MS = 1500;
+export const DURATIONS = [10, 15, 20, 25] as const;
 
 // Every write goes through the server's organiser session (see admin-session.ts).
 const sessionRef = (db: Firestore, code: string) => doc(db, SESSIONS, code);
@@ -63,9 +72,12 @@ const stateRef = (db: Firestore, code: string, id: string) => doc(db, SESSIONS, 
 interface PrivateState {
 	tokenHash: string;
 	q: QuestionState | null;
+	/** The scored result of a word, written once when it is scored. Answers never touch it. */
+	final?: QuestionState | null;
 }
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Wrap a request handler: HTTP errors pass through, anything else becomes a plain message. */
 export async function handle(fn: () => Promise<unknown>) {
@@ -96,12 +108,8 @@ export async function readBody(request: Request): Promise<Record<string, unknown
 // ── Questions ────────────────────────────────────────────────────────────
 
 function toQuestion(id: string, d: Record<string, unknown>): WordQuestion | null {
-	const word = typeof d.word === 'string' ? d.word.trim().toUpperCase() : '';
-	const description = typeof d.description === 'string' ? d.description.trim() : '';
-	if (!isValidWord(word) || !description || description.toUpperCase().includes(word)) return null;
-	const category = CATEGORIES.includes(d.category as never) ? (d.category as WordQuestion['category']) : 'Programming';
-	const difficulty = DIFFICULTIES.includes(d.difficulty as never) ? (d.difficulty as WordQuestion['difficulty']) : 'medium';
-	return { id, word, description, category, difficulty };
+	const q = parseQuestion(id, d);
+	return typeof q === 'string' ? null : q;
 }
 
 /** The selected words never change during a session, so cache them per instance. */
@@ -126,15 +134,29 @@ function newCode() {
 	return s;
 }
 
-export async function createSession(createdBy: string, duration: number): Promise<{ code: string; source: string }> {
+/**
+ * Open a lobby. With `fixed` (a question set chosen from the bank or uploaded
+ * as JSON) the game plays exactly those words in that order; otherwise it
+ * picks QUESTIONS_PER_GAME at random from the bank.
+ */
+export async function createSession(createdBy: string, duration: number, fixed?: unknown): Promise<{ code: string; source: string }> {
 	if (!DURATIONS.includes(duration as never)) error(400, 'Choose a valid time per word.');
 	const db = await adminDb();
-	const stored = (await getDocs(collection(db, QUESTIONS_COLLECTION))).docs
-		.map((d) => toQuestion(d.id, d.data()))
-		.filter((q): q is WordQuestion => !!q);
-	const items = pickQuestions(stored, DEFAULT_QUESTIONS);
-	if (items.length < QUESTIONS_PER_GAME) error(500, 'Not enough questions to start a game.');
-	const source = stored.length >= QUESTIONS_PER_GAME ? 'bank' : stored.length ? 'bank+default' : 'default';
+	let items: WordQuestion[];
+	let source: string;
+	if (fixed !== undefined) {
+		const { questions, errors } = parseQuestionSet(fixed);
+		if (errors.length) error(400, `Fix the question set: ${errors.slice(0, 3).join(' ')}${errors.length > 3 ? ` (+${errors.length - 3} more)` : ''}`);
+		items = questions;
+		source = 'fixed';
+	} else {
+		const stored = (await getDocs(collection(db, QUESTIONS_COLLECTION))).docs
+			.map((d) => toQuestion(d.id, d.data()))
+			.filter((q): q is WordQuestion => !!q);
+		items = pickQuestions(stored, DEFAULT_QUESTIONS);
+		if (items.length < QUESTIONS_PER_GAME) error(500, 'Not enough questions to start a game.');
+		source = stored.length >= QUESTIONS_PER_GAME ? 'bank' : stored.length ? 'bank+default' : 'default';
+	}
 
 	for (let attempt = 0; attempt < 6; attempt++) {
 		const code = newCode();
@@ -195,16 +217,20 @@ async function settleAndRank(db: Firestore, code: string, finished: boolean) {
 		const word = (await sessionWords(db, code))[s.questionIndex].word;
 		const writes: { id: string; q: QuestionState }[] = [];
 		for (const d of statesSnap.docs) {
-			const q = (d.data() as PrivateState).q;
-			if (q && q.index === s.questionIndex && q.status === 'playing' && players.has(d.id)) writes.push({ id: d.id, q: settle(word, q) });
+			const { q, final } = d.data() as PrivateState;
+			if (q && q.index === s.questionIndex && q.status === 'playing' && final?.index !== s.questionIndex && players.has(d.id)) {
+				writes.push({ id: d.id, q: settle(word, q) });
+			}
 		}
-		// 2 writes per player; Firestore batches hold 500.
+		// 2 writes per player; Firestore batches hold 500. Batches are saved in
+		// parallel, and each is all-or-nothing, so a retry never pays twice.
+		const batches: Promise<void>[] = [];
 		for (let i = 0; i < writes.length; i += 200) {
 			const batch = writeBatch(db);
 			for (const { id, q } of writes.slice(i, i + 200)) {
 				const p = players.get(id)!;
 				const summary = { index: q.index, status: q.status, hintsUsed: q.hintsUsed, guesses: q.guesses.length };
-				batch.update(stateRef(db, code, id), { q });
+				batch.update(stateRef(db, code, id), { q, final: q });
 				batch.update(playerRef(db, code, id), {
 					xp: increment(q.earned),
 					correct: increment(q.status === 'correct' ? 1 : 0),
@@ -219,8 +245,9 @@ async function settleAndRank(db: Firestore, code: string, finished: boolean) {
 					q: summary
 				});
 			}
-			await batch.commit();
+			batches.push(batch.commit());
 		}
+		await Promise.all(batches);
 	}
 
 	const all = [...players.values()];
@@ -240,6 +267,23 @@ async function settleAndRank(db: Firestore, code: string, finished: boolean) {
 	await updateDoc(sessionRef(db, code), update);
 }
 
+/**
+ * Catch-up before the next word: score players whose first answer saved after
+ * the reveal's scoring pass (only possible when the host reveals early while
+ * answers are in flight). Anyone already scored has a `final` for this word
+ * and is skipped, so nobody is paid twice. settleAndRank does exactly that
+ * selection and also refreshes the leaderboard.
+ */
+async function settleStragglers(db: Firestore, code: string, s: LiveSession) {
+	if (s.questionIndex < 0) return;
+	const index = s.questionIndex;
+	const late = (await getDocs(collection(db, SESSIONS, code, 'playerState'))).docs.some((d) => {
+		const { q, final } = d.data() as PrivateState;
+		return q?.index === index && q.status === 'playing' && final?.index !== index;
+	});
+	if (late) await settleAndRank(db, code, false);
+}
+
 export async function control(code: string, action: ControlAction): Promise<{ now: number }> {
 	const actions: ControlAction[] = ['sync', 'start', 'next', 'end', 'leaderboard', 'finish'];
 	if (!actions.includes(action)) error(400, 'Unknown action.');
@@ -249,6 +293,11 @@ export async function control(code: string, action: ControlAction): Promise<{ no
 		return { now: Date.now() };
 	}
 	const words = await sessionWords(db, code);
+
+	if (action === 'next') {
+		const s = sessionData(await getDoc(sessionRef(db, code)));
+		if ((s.status === 'result' || s.status === 'leaderboard') && !s.ranking) await settleStragglers(db, code, s);
+	}
 
 	const rank = await runTransaction(db, async (tx) => {
 		const ref = sessionRef(db, code);
@@ -275,6 +324,15 @@ export async function control(code: string, action: ControlAction): Promise<{ no
 			});
 		};
 
+		// A duplicate reveal/finish normally does nothing. If the scoring run it
+		// started died (request cut off), take over the lease and score again;
+		// already-settled players are skipped, so nobody is paid twice.
+		const retryRanking = () => {
+			if (!s.ranking || now - (s.rankingAt ?? 0) < RANKING_LEASE_MS) return false;
+			tx.update(ref, { rankingAt: now });
+			return true;
+		};
+
 		switch (action) {
 			case 'start':
 				if (s.status !== 'lobby') return false; // already started — idempotent
@@ -283,37 +341,44 @@ export async function control(code: string, action: ControlAction): Promise<{ no
 			case 'next': {
 				if (s.status === 'lobby' || s.status === 'finished') error(409, 'The game is not in progress.');
 				if (s.status === 'question') error(409, 'Reveal the answer first.'); // guesses are scored on reveal
+				if (s.ranking) error(409, 'Scores are still being counted. Try again in a moment.');
 				const next = s.questionIndex + 1;
 				if (next >= s.totalQuestions) error(409, 'That was the last word. Show the final results.');
 				goTo(next);
 				return false;
 			}
 			case 'end':
-				if (s.status !== 'question') return false;
-				tx.update(ref, { status: 'result', answer: words[s.questionIndex].word, timerEndsAt: null, ranking: true });
+				if (s.status !== 'question') return s.status === 'result' && retryRanking();
+				tx.update(ref, { status: 'result', answer: words[s.questionIndex].word, timerEndsAt: null, ranking: true, rankingAt: now });
 				return true;
 			case 'leaderboard':
 				if (s.status === 'leaderboard') return false;
 				if (s.status !== 'result') error(409, 'Reveal the answer first.');
+				if (s.ranking) error(409, 'Scores are still being counted. Try again in a moment.');
 				tx.update(ref, { status: 'leaderboard' });
 				return false;
 			case 'finish':
-				if (s.status === 'finished') return false;
+				if (s.status === 'finished') return retryRanking();
 				tx.update(ref, {
 					status: 'finished',
 					endedAt: now,
 					timerEndsAt: null,
 					answer: s.questionIndex >= 0 ? words[s.questionIndex].word : null,
-					ranking: true
+					ranking: true,
+					rankingAt: now
 				});
 				return true;
 		}
 		return false;
 	});
 
-	// Settled after the status change commits: any guess still in flight is
-	// retried against the new status and rejected, so none is missed.
-	if (rank) await settleAndRank(db, code, action === 'finish');
+	// Answers that read the session before this change may still be saving;
+	// later ones see the new status and are rejected. Wait for the former, then
+	// score, so none is missed. (Players see "Updating leaderboard…" meanwhile.)
+	if (rank) {
+		await wait(SETTLE_DELAY_MS);
+		await settleAndRank(db, code, action === 'finish');
+	}
 	return { now: Date.now() };
 }
 
@@ -342,16 +407,47 @@ export async function join(code: string, rawName: unknown) {
 	const nameRef = doc(db, SESSIONS, code, 'names', sha256(name.toLowerCase()));
 	const now = Date.now();
 
-	await runTransaction(db, async (tx) => {
-		if ((await tx.get(nameRef)).exists()) error(409, 'That name is already taken in this game. Try another.');
+	// No transaction (they run roughly one at a time in this SDK — 200 joins
+	// took 76 s). The name check is queued per name instead, so two people
+	// can't claim the same name at the same moment on this server.
+	await withLock(`${code}/name/${nameRef.id}`, async () => {
+		if ((await getDoc(nameRef)).exists()) error(409, 'That name is already taken in this game. Try another.');
 		const player: PlayerDoc = { name, joinedAt: now, xp: 0, correct: 0, failed: 0, skipped: 0, hintsUsed: 0, q: null };
 		const state: PrivateState = { tokenHash: sha256(token), q: null };
-		tx.set(nameRef, { playerId: id });
-		tx.set(playerRef(db, code, id), player);
-		tx.set(stateRef(db, code, id), state);
-		tx.update(sRef, { playerCount: increment(1) });
+		const w = await writerDb();
+		const batch = writeBatch(w);
+		batch.set(doc(w, nameRef.path), { playerId: id });
+		batch.set(playerRef(w, code, id), player);
+		batch.set(stateRef(w, code, id), state);
+		await batch.commit();
 	});
+	await countJoin(db, code);
 	return { playerId: id, token, name, now: Date.now() };
+}
+
+
+/**
+ * Joins that arrive together share one playerCount write. Writing the session
+ * doc once per join made a crowd queue on that single document (a room of 200
+ * filled a few players a second). Increments add up, so this stays correct
+ * across server instances.
+ */
+const pendingJoins = new Map<string, { n: number; done: Promise<void> }>();
+function countJoin(db: Firestore, code: string): Promise<void> {
+	let batch = pendingJoins.get(code);
+	if (!batch) {
+		const b = { n: 0, done: Promise.resolve() };
+		b.done = wait(250).then(async () => {
+			pendingJoins.delete(code); // later joins start a new batch
+			await updateDoc(sessionRef(db, code), { playerCount: increment(b.n) }).catch((err) =>
+				console.error('[tech-word-rush] player count', err)
+			);
+		});
+		pendingJoins.set(code, b);
+		batch = b;
+	}
+	batch.n++;
+	return batch.done;
 }
 
 const REJECTIONS: Record<string, string> = {
@@ -376,11 +472,20 @@ export async function play(code: string, body: Record<string, unknown>): Promise
 	const db = await adminDb();
 	const words = await sessionWords(db, code);
 
-	return runTransaction(db, async (tx) => {
+	// No transaction: the web SDK this server uses runs transactions roughly one
+	// at a time (measured: 20 at once took 16 s, 100 took 32 s), so a crowd's
+	// answers were judged long after they were sent. Instead: read session and
+	// player in parallel, then write once. Safe because
+	//  - one player's requests are queued (withLock) and the phone never sends
+	//    two at once, so nobody else writes this player's live `q` meanwhile;
+	//  - XP changes are increments, never overwrites;
+	//  - once a word is scored its result is kept in `final`, which answers never
+	//    touch, so a late answer can't undo or double a payout.
+	return withLock(`${code}/${playerId}`, async () => {
 		const [sSnap, stSnap, pSnap] = await Promise.all([
-			tx.get(sessionRef(db, code)),
-			tx.get(stateRef(db, code, playerId)),
-			tx.get(playerRef(db, code, playerId))
+			getDoc(sessionRef(db, code)),
+			getDoc(stateRef(db, code, playerId)),
+			getDoc(playerRef(db, code, playerId))
 		]);
 		const s = sessionData(sSnap);
 		const st = stSnap.data() as PrivateState | undefined;
@@ -394,8 +499,9 @@ export async function play(code: string, body: Record<string, unknown>): Promise
 		const now = Date.now();
 		const idx = s.questionIndex;
 		const word = idx >= 0 ? words[idx].word : '';
-		const active = s.status === 'question' && s.timerEndsAt !== null && now <= s.timerEndsAt + GRACE_MS;
-		let q = idx >= 0 ? (st.q && st.q.index === idx ? st.q : freshQuestion(idx)) : null;
+		const scored = idx >= 0 && st.final?.index === idx ? st.final : null;
+		const active = !scored && s.status === 'question' && s.timerEndsAt !== null && now <= s.timerEndsAt + GRACE_MS;
+		let q = idx >= 0 ? (scored ?? (st.q && st.q.index === idx ? st.q : freshQuestion(idx))) : null;
 		let xp = p.xp;
 		let result: PlayerView['result'];
 		let rejected: string | undefined;
@@ -414,14 +520,17 @@ export async function play(code: string, body: Record<string, unknown>): Promise
 				} else {
 					const next = out.q;
 					result = action === 'hint' ? 'hint' : action === 'skip' ? 'skipped' : 'guess';
-					tx.update(stateRef(db, code, playerId), { q: next });
+					const w = await writerDb(); // spread a crowd's writes over several connections
+					const batch = writeBatch(w);
+					batch.update(stateRef(w, code, playerId), { q: next });
 					// Correct/failed are only counted when the answer is revealed.
-					tx.update(playerRef(db, code, playerId), {
-						xp: out.totalXp,
+					batch.update(playerRef(w, code, playerId), {
+						xp: increment(out.totalXp - xp), // only paid hints change it here
 						q: { index: next.index, status: next.status, hintsUsed: next.hintsUsed, guesses: next.guesses.length },
 						skipped: increment(result === 'skipped' ? 1 : 0),
 						hintsUsed: increment(result === 'hint' ? 1 : 0)
 					});
+					await batch.commit();
 					q = next;
 					xp = out.totalXp;
 				}
@@ -432,7 +541,8 @@ export async function play(code: string, body: Record<string, unknown>): Promise
 		const ended = s.status === 'result' || s.status === 'leaderboard' || s.status === 'finished';
 		const shown = q && ended ? settle(word, q) : q;
 		return {
-			now,
+			now: Date.now(), // stamped as late as possible: clients set their clocks from it
+			judgedAt: now, // when the timer was checked (saving can take longer)
 			xp,
 			q: shown && {
 				index: shown.index,
@@ -448,4 +558,13 @@ export async function play(code: string, body: Record<string, unknown>): Promise
 			...(result ? { result } : {})
 		};
 	});
+}
+
+/** Run `fn` after any earlier call with the same key has finished (per server process). */
+const locks = new Map<string, Promise<unknown>>();
+function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+	const run = (locks.get(key) ?? Promise.resolve()).catch(() => {}).then(fn);
+	locks.set(key, run);
+	run.finally(() => locks.get(key) === run && locks.delete(key)).catch(() => {});
+	return run;
 }

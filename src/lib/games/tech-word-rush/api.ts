@@ -1,4 +1,5 @@
 import type { ControlAction, PlayAction, PlayerView } from './types';
+import type { WordQuestion } from './questions';
 
 /**
  * Browser calls to the Tech Word Rush endpoints. Every message shown to a
@@ -30,23 +31,28 @@ async function post<T>(url: string, body: unknown, token?: string): Promise<T> {
 	}
 	const data = await res.json().catch(() => ({}));
 	if (!res.ok) throw new GameError(data?.message || 'Something went wrong. Please try again.', res.status);
+	if (typeof data?.now === 'number') syncClock(data.now);
 	return data as T;
 }
 
 /** Server clock minus local clock, so every screen counts down to the same instant. */
+// Every reply stamps `now` just before it is sent, so (server now − arrival)
+// is right to within the network delay however long the server took. (A
+// midpoint estimate was tried and was off by many seconds under load: a busy
+// server stamps late in a long round trip, not in the middle.)
 let clockOffset = 0;
+/** Align with a reply's `now` (also used by the Flappy Bird API, which shares this clock). */
 export const syncClock = (serverNow: number) => (clockOffset = serverNow - Date.now());
 export const serverNow = () => Date.now() + clockOffset;
 
 // Admin ──────────────────────────────────────────────────────────────────
 
-export const createSession = (token: string, duration: number) =>
-	post<{ code: string; source: string }>(BASE, { duration }, token);
+/** `questions` = a fixed set to play in order; omit it for a random pick from the bank. */
+export const createSession = (token: string, duration: number, questions?: WordQuestion[]) =>
+	post<{ code: string; source: string }>(BASE, { duration, ...(questions ? { questions } : {}) }, token);
 
 export async function control(token: string, code: string, action: ControlAction) {
-	const res = await post<{ now: number }>(`${BASE}/${code}/control`, { action }, token);
-	syncClock(res.now);
-	return res;
+	return post<{ now: number }>(`${BASE}/${code}/control`, { action }, token);
 }
 
 // Participant ────────────────────────────────────────────────────────────
@@ -78,7 +84,6 @@ export function forgetIdentity(code: string) {
 
 export async function join(code: string, name: string): Promise<Identity> {
 	const res = await post<Identity & { now: number }>(`${BASE}/${code}/join`, { name });
-	syncClock(res.now);
 	const id = { playerId: res.playerId, token: res.token, name: res.name };
 	try {
 		localStorage.setItem(key(code), JSON.stringify(id));
@@ -94,7 +99,5 @@ export async function play(
 	action: PlayAction,
 	extra: { expect?: number; answer?: string } = {}
 ): Promise<PlayerView> {
-	const res = await post<PlayerView>(`${BASE}/${code}/play`, { playerId: id.playerId, token: id.token, action, ...extra });
-	syncClock(res.now);
-	return res;
+	return post<PlayerView>(`${BASE}/${code}/play`, { playerId: id.playerId, token: id.token, action, ...extra });
 }

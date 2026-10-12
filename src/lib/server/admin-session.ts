@@ -28,9 +28,9 @@ export function adminConfigured() {
 	return Boolean(adminEmail() && priv.ADMIN_PASSWORD && pub.VITE_FIREBASE_API_KEY && pub.VITE_FIREBASE_PROJECT_ID);
 }
 
-function app(): FirebaseApp {
+function app(name = APP_NAME): FirebaseApp {
 	try {
-		return getApp(APP_NAME);
+		return getApp(name);
 	} catch {
 		const config = {
 			apiKey: pub.VITE_FIREBASE_API_KEY,
@@ -41,7 +41,7 @@ function app(): FirebaseApp {
 		// main's src/lib/firebase.js calls getApp() whenever any app exists, which
 		// throws if only this named one does — so keep a default app alongside it.
 		if (!getApps().some((a) => a.name === '[DEFAULT]')) initializeApp(config);
-		const created = initializeApp(config, APP_NAME);
+		const created = initializeApp(config, name);
 		// Local testing against the Firebase emulators.
 		if (priv.FIREBASE_AUTH_EMULATOR_HOST) {
 			connectAuthEmulator(getAuth(created), `http://${priv.FIREBASE_AUTH_EMULATOR_HOST}`, { disableWarnings: true });
@@ -90,6 +90,35 @@ export function adminDb(): Promise<Firestore> {
 			error(503, 'The server could not sign in to Firebase. Check ADMIN_EMAIL and ADMIN_PASSWORD in .env.');
 		});
 	return session;
+}
+
+/**
+ * Extra organiser connections for player writes. One Firestore instance of
+ * this SDK sends all its writes through a single ordered queue (about 10 in
+ * flight), so it tops out near 25 writes a second: 200 players answering at
+ * once took ~10 s to save. Spread over 8 connections, the same 200 saved in
+ * ~1.3 s (measured). A batch must use refs from the db it commits on.
+ */
+const WRITERS = 8;
+let writers: Promise<Firestore[]> | null = null;
+let turn = 0;
+
+export async function writerDb(): Promise<Firestore> {
+	if (!adminConfigured()) error(503, NOT_CONFIGURED);
+	writers ??= Promise.all(
+		Array.from({ length: WRITERS }, async (_, i) => {
+			const a = app(`${APP_NAME}-writer-${i}`);
+			const auth = getAuth(a);
+			if (!auth.currentUser) await signIn(auth);
+			return getFirestore(a);
+		})
+	).catch((err) => {
+		writers = null;
+		console.error('[admin-session] writer sign-in failed:', err);
+		error(503, 'The server could not sign in to Firebase. Check ADMIN_EMAIL and ADMIN_PASSWORD in .env.');
+	});
+	const list = await writers;
+	return list[turn++ % list.length];
 }
 
 /** True when the typed credentials match .env (constant-time). */

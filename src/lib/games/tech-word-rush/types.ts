@@ -60,7 +60,16 @@ export interface LiveSession {
 	winner: { name: string; xp: number } | null;
 	/** True between a question ending and its leaderboard being written. */
 	ranking?: boolean;
+	/** Server time scoring started; a run older than RANKING_LEASE_MS is presumed dead. */
+	rankingAt?: number;
 }
+
+/**
+ * If scoring hasn't finished this long after it started (the request was cut
+ * off), a repeated reveal/finish may score again. Shorter would risk two runs
+ * at once paying XP twice.
+ */
+export const RANKING_LEASE_MS = 20_000;
 
 export interface PlayerDoc {
 	name: string;
@@ -77,6 +86,8 @@ export interface PlayerDoc {
 /** What the play endpoint returns to the participant. */
 export interface PlayerView {
 	now: number;
+	/** Server time the action was checked against the timer. */
+	judgedAt: number;
 	xp: number;
 	q: {
 		index: number;

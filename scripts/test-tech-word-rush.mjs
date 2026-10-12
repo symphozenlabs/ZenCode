@@ -13,7 +13,14 @@ import {
 	rankPlayers,
 	settle
 } from '../src/lib/games/tech-word-rush/engine.ts';
-import { DEFAULT_QUESTIONS, pickQuestions, CATEGORIES } from '../src/lib/games/tech-word-rush/questions.ts';
+import {
+	DEFAULT_QUESTIONS,
+	pickQuestions,
+	CATEGORIES,
+	QUESTIONS_PER_GAME,
+	MAX_FIXED_QUESTIONS,
+	parseQuestionSet
+} from '../src/lib/games/tech-word-rush/questions.ts';
 
 const WORD = 'PYTHON';
 const hint = (q, xp, rnd = () => 0) => applyHint(WORD, q, xp, true, q.hintsUsed, rnd);
@@ -244,12 +251,45 @@ test('question bank: ≥30 valid, unique, clue never contains the answer', () =>
 	for (const c of CATEGORIES) assert.ok(DEFAULT_QUESTIONS.some((q) => q.category === c), `no ${c} words`);
 });
 
-test('pickQuestions: 10 unique words, preferred first, ordered easy → hard', () => {
+test('pickQuestions: 15 unique words, preferred first, ordered easy → hard', () => {
 	const preferred = DEFAULT_QUESTIONS.slice(0, 4);
 	const picked = pickQuestions(preferred, DEFAULT_QUESTIONS);
-	assert.equal(picked.length, 10);
-	assert.equal(new Set(picked.map((q) => q.word)).size, 10);
+	assert.equal(QUESTIONS_PER_GAME, 15);
+	assert.equal(picked.length, QUESTIONS_PER_GAME);
+	assert.equal(new Set(picked.map((q) => q.word)).size, QUESTIONS_PER_GAME);
 	for (const p of preferred) assert.ok(picked.some((q) => q.word === p.word));
 	const order = { easy: 0, medium: 1, hard: 2 };
 	for (let i = 1; i < picked.length; i++) assert.ok(order[picked[i - 1].difficulty] <= order[picked[i].difficulty]);
+});
+
+test('parseQuestionSet: keeps order, fills defaults, accepts { questions: [...] }', () => {
+	const raw = [
+		{ word: 'kernel', description: 'Core of an operating system that manages hardware.' },
+		{ word: 'CACHE', description: 'Small fast memory close to the CPU.', category: 'Computer Fundamentals', difficulty: 'easy' }
+	];
+	const { questions, errors } = parseQuestionSet(raw);
+	assert.deepEqual(errors, []);
+	assert.deepEqual(questions.map((q) => q.word), ['KERNEL', 'CACHE']);
+	assert.equal(questions[0].category, 'Programming');
+	assert.equal(questions[0].difficulty, 'medium');
+	assert.equal(questions[1].difficulty, 'easy');
+	assert.equal(parseQuestionSet({ questions: raw }).questions.length, 2);
+});
+
+test('parseQuestionSet: reports every bad entry', () => {
+	const { errors } = parseQuestionSet([
+		{ word: 'OK', description: 'Word is too short.' },
+		{ word: 'ROUTER', description: '' },
+		{ word: 'SOCKET', description: 'A SOCKET is an endpoint.' },
+		{ word: 'MODEM', description: 'Converts digital signals for phone lines.' },
+		{ word: 'modem', description: 'Same word again, different case.' }
+	]);
+	assert.equal(errors.length, 4);
+	assert.match(errors[0], /^#1:/);
+	assert.match(errors[3], /^#5: MODEM appears more than once/);
+	assert.ok(parseQuestionSet('nope').errors.length);
+	assert.ok(parseQuestionSet([]).errors.length);
+	const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+	const many = Array.from({ length: MAX_FIXED_QUESTIONS + 1 }, (_, i) => ({ word: `Q${letters[i % 26]}${letters[Math.floor(i / 26)]}`, description: 'A clue that is fine.' }));
+	assert.ok(parseQuestionSet(many).errors.some((e) => e.includes('at most')));
 });

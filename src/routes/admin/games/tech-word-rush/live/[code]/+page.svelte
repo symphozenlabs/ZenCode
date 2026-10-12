@@ -5,9 +5,9 @@
 	import { Users, X, Maximize, Minimize, Play, Eye, ListOrdered, SkipForward, Flag, Trophy, CloudOff, ArrowLeft } from '@lucide/svelte';
 	import { db } from '$lib/firebase/client';
 	import { adminAuth } from '$lib/stores/admin-auth.svelte';
-	import { control } from '$lib/games/tech-word-rush/api';
+	import { control, serverNow } from '$lib/games/tech-word-rush/api';
 	import { MAX_GUESSES, maskWord } from '$lib/games/tech-word-rush/engine';
-	import { SESSIONS, type ControlAction, type LiveSession, type PlayerDoc } from '$lib/games/tech-word-rush/types';
+	import { RANKING_LEASE_MS, SESSIONS, type ControlAction, type LiveSession, type PlayerDoc } from '$lib/games/tech-word-rush/types';
 	import Logo from '$lib/components/site/Logo.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
@@ -96,10 +96,61 @@
 	);
 	const fullWord = $derived(session?.answer ? maskWord(session.answer, [...session.answer].map((_, i) => i)) : []);
 
-	// Timer expiry ends the question (server ignores duplicates).
-	function onExpire() {
-		if (session?.status === 'question') run('end');
-	}
+	// Reveal the answer the moment time runs out, and keep retrying until the
+	// server confirms. A one-shot call was lost when another action was in
+	// flight, the request failed, or a background tab's timers were throttled.
+	// The server ignores duplicate ends.
+	const deadline = $derived(session?.status === 'question' ? session.timerEndsAt : null);
+	$effect(() => {
+		const end = deadline;
+		if (!end) return;
+		let stopped = false;
+		let timer: ReturnType<typeof setTimeout>;
+		const attempt = async () => {
+			if (stopped) return;
+			const left = end - serverNow();
+			if (left > 0) {
+				timer = setTimeout(attempt, Math.min(left, 1000));
+				return;
+			}
+			try {
+				const token = await adminAuth.user?.getIdToken();
+				if (token && !stopped) await control(token, code, 'end');
+			} catch (err) {
+				if (!stopped) actionError = (err as Error).message || 'Unable to reveal the answer. Retrying…';
+			}
+			// Stops once the snapshot shows the reveal (deadline → null).
+			if (!stopped) timer = setTimeout(attempt, 2000);
+		};
+		attempt();
+		return () => {
+			stopped = true;
+			clearTimeout(timer);
+		};
+	});
+
+	// If scoring was cut off (e.g. the server request timed out), "Counting
+	// scores…" would never clear. Once its lease runs out, ask again; the server
+	// only re-scores a run that is really dead, and skips anyone already paid.
+	const stuckRanking = $derived(
+		session?.ranking && (status === 'result' || status === 'finished') ? { at: session.rankingAt ?? 0, action: status === 'result' ? 'end' : 'finish' } : null
+	);
+	$effect(() => {
+		const r = stuckRanking;
+		if (!r) return;
+		let timer: ReturnType<typeof setTimeout>;
+		const retry = async () => {
+			try {
+				const token = await adminAuth.user?.getIdToken();
+				if (token) await control(token, code, r.action as ControlAction);
+			} catch {
+				/* tried again below */
+			}
+			timer = setTimeout(retry, 10_000);
+		};
+		timer = setTimeout(retry, Math.max(0, r.at + RANKING_LEASE_MS + 500 - serverNow()));
+		return () => clearTimeout(timer);
+	});
 
 	// ── End game confirm + fullscreen ───────────────────────────────────
 	let confirmEnd = $state(false);
@@ -195,7 +246,7 @@
 										<p class="mt-2 inline-flex rounded-md border border-green-300/30 bg-forest-900/60 px-2.5 py-1 text-sm font-medium text-green-300">{session.current.category}</p>
 									</div>
 									<div class="size-24 shrink-0 md:size-32">
-										<Countdown endsAt={session.timerEndsAt} total={session.duration} onexpire={onExpire} />
+										<Countdown endsAt={session.timerEndsAt} total={session.duration} />
 									</div>
 								</div>
 								<div class="my-auto py-8">
@@ -314,12 +365,12 @@
 					{:else if status === 'result' || status === 'leaderboard'}
 						<Button variant="stage" size="lg" onclick={() => (confirmEnd = true)}><Flag class="size-4" /> End game</Button>
 						{#if status === 'result'}
-							<Button variant="stage" size="lg" onclick={() => run('leaderboard')} loading={busy === 'leaderboard'}><ListOrdered class="size-4" /> Show leaderboard</Button>
+							<Button variant="stage" size="lg" onclick={() => run('leaderboard')} loading={busy === 'leaderboard'} disabled={session.ranking}><ListOrdered class="size-4" /> Show leaderboard</Button>
 						{/if}
 						{#if isLast}
 							<Button variant="sun" size="lg" onclick={() => run('finish')} loading={busy === 'finish'}><Trophy class="size-4" /> Final results</Button>
 						{:else}
-							<Button variant="sun" size="lg" onclick={() => run('next')} loading={busy === 'next'}><SkipForward class="size-4" /> Next word</Button>
+							<Button variant="sun" size="lg" onclick={() => run('next')} loading={busy === 'next' || session.ranking} disabled={session.ranking}><SkipForward class="size-4" /> {session.ranking ? 'Counting scores…' : 'Next word'}</Button>
 						{/if}
 					{:else}
 						<Button variant="sun" size="lg" href="/admin/games"><ArrowLeft class="size-4" /> Back to games</Button>
