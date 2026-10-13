@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { collection, limit, onSnapshot, orderBy, query } from 'firebase/firestore';
-	import { Play, ListChecks, Radio, History, Trophy, Users, CloudOff, Gamepad2, TriangleAlert, ArrowRight } from '@lucide/svelte';
+	import { Play, ListChecks, Radio, History, Trophy, Users, CloudOff, Gamepad2, TriangleAlert, ArrowRight, Trash2 } from '@lucide/svelte';
 	import { db } from '$lib/firebase/client';
 	import { adminAuth } from '$lib/stores/admin-auth.svelte';
 	import { GAMES, gameName, presenterHref } from '$lib/games/registry';
@@ -87,6 +87,28 @@
 			creating = false;
 		}
 	}
+
+	// Clear session history (deletes the finished sessions from Firestore)
+	let confirmClear = $state(false);
+	let clearing = $state(false);
+	let clearError = $state('');
+
+	async function clearHistory() {
+		clearing = true;
+		clearError = '';
+		try {
+			const token = await adminAuth.user?.getIdToken();
+			if (!token) throw new Error('Your session expired. Sign in again.');
+			const res = await fetch('/api/games/history', { method: 'DELETE', headers: { authorization: `Bearer ${token}`, accept: 'application/json' } });
+			const data = await res.json().catch(() => ({}));
+			if (!res.ok) throw new Error(data?.message || 'Unable to clear the history.');
+			confirmClear = false; // the list empties itself through the live query
+		} catch (err) {
+			clearError = (err as Error).message || 'Unable to clear the history.';
+		} finally {
+			clearing = false;
+		}
+	}
 </script>
 
 <svelte:head><title>Games — ZenCode Admin</title></svelte:head>
@@ -111,13 +133,23 @@
 				class="group flex flex-col overflow-hidden rounded-lg border border-border bg-card transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:border-ring/50 hover:shadow-lg hover:shadow-forest-950/5"
 			>
 				<div class="relative h-44 overflow-hidden bg-stage px-5 py-5 text-cream">
-					<AnimatedGrid size={28} animated={false} />
-					<GradientOrb size="16rem" class="-top-24 -right-16 opacity-40" />
+					{#if game.poster}
+						<img
+							src={game.poster}
+							alt=""
+							class="absolute inset-0 size-full scale-105 object-cover object-[50%_18%] transition-transform duration-[1200ms] ease-out group-hover:scale-115 group-hover:-rotate-1"
+						/>
+						<div class="absolute inset-0 bg-gradient-to-t from-stage via-stage/55 to-stage/0"></div>
+						<span class="card-sheen pointer-events-none absolute inset-0" aria-hidden="true"></span>
+					{:else}
+						<AnimatedGrid size={28} animated={false} />
+						<GradientOrb size="16rem" class="-top-24 -right-16 opacity-40" />
+					{/if}
 					<div class="relative flex h-full flex-col justify-between">
-						<p class="eyebrow text-green-300/80">Live game</p>
+						<p class="eyebrow {game.poster ? 'w-fit rounded-full bg-stage/60 px-2 py-0.5 text-green-300 backdrop-blur' : 'text-green-300/80'}">Live game</p>
 						<div>
-							{#if game.id === 'symba'}
-								<img src="/games/symba/boost.webp" alt="" class="absolute -top-6 -right-4 h-44 w-auto drop-shadow-[0_12px_24px_rgba(0,0,0,0.45)] transition-transform duration-500 group-hover:-translate-y-2 group-hover:rotate-[-3deg]" />
+							{#if game.poster}
+								<!-- The poster is the art -->
 							{:else if game.id === 'flappy'}
 								<svg viewBox="0 0 160 70" class="absolute -top-1 right-0 h-28 w-auto" aria-hidden="true">
 									<defs>
@@ -229,7 +261,12 @@
 		<header class="flex items-center gap-2 border-b border-border px-4 py-3">
 			<History class="size-4 text-muted-foreground" />
 			<h2 id="history-h" class="text-[15px] font-semibold">Session history</h2>
-			{#if history.length}<span class="ml-auto text-xs text-muted-foreground tabular">{history.length}</span>{/if}
+			{#if history.length}
+				<span class="ml-auto text-xs text-muted-foreground tabular">{history.length}</span>
+				<Button size="sm" variant="ghost" class="-my-1 text-muted-foreground hover:text-destructive" onclick={() => ((clearError = ''), (confirmClear = true))}>
+					<Trash2 class="size-3.5" /> Clear all
+				</Button>
+			{/if}
 		</header>
 		{#if status === 'loading'}
 			<ul class="divide-y divide-border">
@@ -281,7 +318,7 @@
 			<ul class="space-y-1.5 text-[13px] text-muted-foreground">
 				<li>• Players can practise in the lobby while they wait.</li>
 				<li>• Once you start, they fly as many times as they like until time runs out.</li>
-				<li>• Each new flight <span class="font-medium text-foreground">replaces</span> their previous score — only the latest counts.</li>
+				<li>• Only each player’s <span class="font-medium text-foreground">best</span> flight counts — a worse one never lowers their score.</li>
 				<li>• The final leaderboard appears when the timer ends.</li>
 			</ul>
 			{#if createError}<p class="text-[13px] text-destructive" role="alert">{createError}</p>{/if}
@@ -317,3 +354,34 @@
 		<Button onclick={start} loading={creating}>{creating ? 'Creating game…' : 'Create lobby'}</Button>
 	{/snippet}
 </Modal>
+
+<Modal
+	open={confirmClear}
+	title="Clear session history?"
+	description="Every finished game is permanently deleted: leaderboards, winners, players and their data."
+	onclose={() => !clearing && (confirmClear = false)}
+>
+	<p class="text-sm text-muted-foreground">Lobbies and games still running are kept. This cannot be undone.</p>
+	{#if clearError}<p class="mt-3 text-[13px] text-destructive" role="alert">{clearError}</p>{/if}
+	{#snippet footer()}
+		<Button variant="ghost" onclick={() => (confirmClear = false)} disabled={clearing}>Cancel</Button>
+		<Button variant="destructive" onclick={clearHistory} loading={clearing}><Trash2 class="size-4" /> {clearing ? 'Deleting…' : 'Delete all'}</Button>
+	{/snippet}
+</Modal>
+
+<style>
+	/* A band of light sweeps across poster art on hover. */
+	.card-sheen {
+		background: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, 0.28) 48%, transparent 60%);
+		transform: translateX(-110%);
+	}
+	:global(.group:hover) .card-sheen {
+		transform: translateX(110%);
+		transition: transform 0.9s cubic-bezier(0.45, 0, 0.2, 1);
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.card-sheen {
+			display: none;
+		}
+	}
+</style>

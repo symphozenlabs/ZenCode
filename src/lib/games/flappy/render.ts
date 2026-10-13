@@ -625,7 +625,7 @@ function mixHex(a: string, b: string, t: number) {
 	return rgb(mixC(hex(a), hex(b), t));
 }
 
-// ── Shared scene pieces (also used by the Symba Ride city) ──────────────────
+// ── Shared scene pieces (also used by the Soar & Roar city) ──────────────────
 
 export function drawSky(ctx: CanvasRenderingContext2D, viewW: number, p: Palette, clock: number) {
 	const g = ctx.createLinearGradient(0, 0, 0, GROUND_Y);

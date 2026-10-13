@@ -79,8 +79,12 @@ export function fieldsUsed(design) {
 		if (el.type !== 'text') continue;
 		for (const m of String(el.text ?? '').matchAll(FIELD)) used.add(m[1]);
 	}
+	for (const m of String(design?.page?.html?.html ?? '').matchAll(FIELD)) if (m[1] !== QR_FIELD) used.add(m[1]);
 	return [...used];
 }
+
+/** In an uploaded HTML certificate, `{{qr_code}}` marks where the verification QR goes. */
+export const QR_FIELD = 'qr_code';
 
 export const ELEMENT_TYPES = ['text', 'image', 'rect', 'ellipse', 'line', 'qr'];
 
@@ -186,47 +190,76 @@ export function blankDesign(size = 'a4', orientation = 'landscape') {
  * @param {{ src: string, width: number, height: number }} image a data URL and its pixel size
  */
 export function uploadedDesign({ src, width, height }) {
+	const d = {
+		version: 1,
+		page: { ...closestPage(width, height), background: '#ffffff', backgroundImage: src },
+		elements: []
+	};
+	d.elements = overlays(d.page, { name: true, qr: true, id: true });
+	return d;
+}
+
+/** The page size and orientation closest to a `width` × `height` shape, so as little as possible is cropped. */
+function closestPage(width, height) {
 	const ratio = width > 0 && height > 0 ? width / height : Math.SQRT2;
 	const candidates = Object.keys(PAGE_SIZES).flatMap((size) =>
 		size === 'square' ? [pageOf(size)] : [pageOf(size), pageOf(size, 'portrait')]
 	);
-	const page = candidates.reduce((best, p) =>
+	return candidates.reduce((best, p) =>
 		Math.abs(Math.log(p.width / p.height / ratio)) <
 		Math.abs(Math.log(best.width / best.height / ratio))
 			? p
 			: best
 	);
+}
 
-	const d = {
-		version: 1,
-		page: { ...page, background: '#ffffff', backgroundImage: src },
-		elements: []
-	};
-	const p = d.page;
+/** The participant's name, verification QR and certificate ID laid over an uploaded certificate. */
+function overlays(p, want) {
 	const qr = Math.round(Math.min(p.width, p.height) * 0.13);
 	const margin = Math.round(Math.min(p.width, p.height) * 0.05);
-	d.elements = [
-		text(p, p.width * 0.15, p.height * 0.42, p.width * 0.7, 70, '{{participant_name}}', {
-			fontFamily: 'Playfair Display',
-			fontSize: Math.round(p.width / 22),
-			fontWeight: 600,
-			color: '#1f2621'
-		}),
-		makeElement('qr', p, {
-			x: p.width - margin - qr,
-			y: p.height - margin - qr - 18,
-			width: qr,
-			height: qr
-		}),
-		text(p, p.width - margin - 220, p.height - margin - 14, 220, 16, '{{certificate_id}}', {
-			fontFamily: 'Montserrat',
-			fontSize: 10,
-			color: '#3b433e',
-			align: 'right',
-			letterSpacing: 1
-		})
-	];
-	return d;
+	return [
+		want.name &&
+			text(p, p.width * 0.15, p.height * 0.42, p.width * 0.7, 70, '{{participant_name}}', {
+				fontFamily: 'Playfair Display',
+				fontSize: Math.round(p.width / 22),
+				fontWeight: 600,
+				color: '#1f2621'
+			}),
+		want.qr &&
+			makeElement('qr', p, {
+				x: p.width - margin - qr,
+				y: p.height - margin - qr - 18,
+				width: qr,
+				height: qr
+			}),
+		want.id &&
+			text(p, p.width - margin - 220, p.height - margin - 14, 220, 16, '{{certificate_id}}', {
+				fontFamily: 'Montserrat',
+				fontSize: 10,
+				color: '#3b433e',
+				align: 'right',
+				letterSpacing: 1
+			})
+	].filter(Boolean);
+}
+
+/**
+ * A design around an uploaded HTML certificate. The HTML is drawn as the page,
+ * keeping its own fonts and styles, and merge fields written into it
+ * (`{{participant_name}}` …) are filled in its own text style. Only what the
+ * HTML doesn't place itself — the name, the QR, the ID — is laid on top, ready
+ * to drag into place.
+ *
+ * @param {{ html: string, viewW: number, viewH: number, crop: { x: number, y: number, w: number, h: number } }} layer
+ */
+export function uploadedHtmlDesign(layer) {
+	const has = (field) => layer.html.includes(`{{${field}}}`);
+	const page = { ...closestPage(layer.crop.w, layer.crop.h), background: '#ffffff', backgroundImage: '', html: layer };
+	return {
+		version: 1,
+		page,
+		elements: overlays(page, { name: !has('participant_name'), qr: !has(QR_FIELD), id: !has('certificate_id') })
+	};
 }
 
 // ── Starter designs ─────────────────────────────────────────────────────────
@@ -624,6 +657,32 @@ const bool = (v) => v === true;
 const image = (v) => (IMAGE.test(String(v ?? '')) ? String(v) : '');
 
 /**
+ * An uploaded HTML page layer: the self-contained document, the viewport it
+ * was laid out in and the box of the certificate inside it. Scripts never run
+ * (it is shown in a sandboxed frame or as an image), but anything that could
+ * script or fetch is dropped here too, in case a design arrives some other way.
+ */
+function htmlLayer(v) {
+	if (!v || typeof v !== 'object' || typeof v.html !== 'string' || !v.html.trim()) return null;
+	const html = v.html
+		.replace(/<script\b[\s\S]*?<\/script\s*>/gi, '')
+		.replace(/<\/?(script|iframe|frame|object|embed|base)\b[^>]*>/gi, '')
+		.replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+		.replace(/javascript:/gi, '');
+	const viewW = num(v.viewW, 200, 6000, 1200);
+	const viewH = num(v.viewH, 200, 8000, 900);
+	const c = v.crop ?? {};
+	const x = num(c.x, 0, viewW, 0);
+	const y = num(c.y, 0, viewH, 0);
+	return {
+		html,
+		viewW,
+		viewH,
+		crop: { x, y, w: num(c.w, 50, viewW - x, viewW - x), h: num(c.h, 50, viewH - y, viewH - y) }
+	};
+}
+
+/**
  * A design as it is stored: every value checked and clamped, and
  * anything unknown dropped. Returns `{ ok, design, errors }`.
  */
@@ -640,6 +699,8 @@ export function normaliseDesign(raw) {
 		background: color(raw.page?.background, '#ffffff'),
 		backgroundImage: image(raw.page?.backgroundImage)
 	};
+	const html = htmlLayer(raw.page?.html);
+	if (html) page.html = html;
 
 	const list = Array.isArray(raw.elements) ? raw.elements.slice(0, 200) : [];
 	const W = page.width * 2;

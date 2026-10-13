@@ -416,6 +416,8 @@ export class LiveHub {
 			if (set && !set.size) {
 				room.players.delete(c.participantId);
 				room.markLobby();
+				// The phone that left may have been the last one still thinking
+				room.checkEveryoneAnswered();
 			}
 		}
 		c.room = null;

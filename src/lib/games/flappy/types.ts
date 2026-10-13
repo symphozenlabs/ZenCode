@@ -1,7 +1,7 @@
 import type { FlyGame } from './skins';
 
 /**
- * Firestore shapes for a Flappy Bird or Symba Ride session (same game,
+ * Firestore shapes for a Flappy Bird or Soar & Roar session (same game,
  * different skin). It shares the `liveSessions`
  * collection (and its rules) with Tech Word Rush, told apart by `gameType`.
  *
@@ -10,15 +10,15 @@ import type { FlyGame } from './skins';
  *   liveSessions/{code}/playerState/*   private     — server only (device token hash)
  *   liveSessions/{code}/names/*         private     — server only (unique display names)
  *
- * Players fly as many times as they like while the timer runs; each new
- * flight wipes their previous score, so only the latest flight counts.
+ * Players fly as many times as they like while the timer runs; their best
+ * flight is the one that counts (40 then 30 stays 40).
  *
  * Built for a full room (a few hundred phones): joining never writes the
  * session doc every phone listens to, and a flight is two writes to the
  * player's own doc (start, land).
  */
 
-/** ZF… is Flappy Bird, ZS… is Symba Ride. */
+/** ZF… is Flappy Bird, ZS… is Soar & Roar. */
 export const CODE_RE = /^Z[FS][A-Z2-9]{4}$/;
 /** Round window lengths the admin can pick, in seconds. */
 export const DURATIONS = [60, 120, 180, 300, 600] as const;
@@ -51,13 +51,16 @@ export interface FlapSession {
 	winner: { name: string; score: number } | null;
 	/** True while the final scores are being counted. */
 	ranking?: boolean;
+	/** How many times the host restarted this code; phones clear their last flight when it changes. */
+	resets?: number;
 }
 
 export interface FlapPlayer {
 	name: string;
 	joinedAt: number;
-	/** Score of the latest flight (0 while one is in the air). */
+	/** Best flight so far. */
 	score: number;
+	/** When that best was reached (earlier wins a tie). */
 	scoredAt: number | null;
 	rounds: number;
 	flying: boolean;
@@ -73,15 +76,17 @@ export interface FlapView {
 	status: FlapStatus;
 	/** Number of the current/last flight; send it back with its score. */
 	round: number;
+	/** Best flight so far. */
 	score: number;
 	rounds: number;
 	flying: boolean;
-	/** The score as saved, when a flight was just submitted (may be capped). */
+	/** The flight's score as saved, when a flight was just submitted (may be capped). */
 	saved?: number;
 	rejected?: string;
 }
 
-export type FlapControl = 'sync' | 'start' | 'finish';
+/** `restart` sends the same code back to the lobby with every score cleared; players stay joined. */
+export type FlapControl = 'sync' | 'start' | 'finish' | 'restart';
 export type FlapAction = 'state' | 'start' | 'end';
 
 export const formatClock = (ms: number) => {

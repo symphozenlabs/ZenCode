@@ -71,6 +71,17 @@
 	});
 	const share = $derived(room.eligible ? Math.min(1, room.answered / room.eligible) : 0);
 
+	// ---- Moving on by itself (the server sets advanceAt after a reveal) ---------------
+	let nextIn = $state(0);
+	$effect(() => {
+		const at = run.advanceAt;
+		if (at == null) return void (nextIn = 0);
+		const tick = () => (nextIn = Math.max(0, Math.ceil((at - (Date.now() + room.clockOffset)) / 1000)));
+		tick();
+		const id = setInterval(tick, 200);
+		return () => clearInterval(id);
+	});
+
 	// ---- Celebrations -----------------------------------------------------------
 	let warn = $state(false);
 	let burstKey = $state(0);
@@ -194,7 +205,11 @@
 							style:background="linear-gradient(90deg, color-mix(in srgb, var(--accent) 50%, transparent), var(--accent))"
 						></div>
 					</div>
-					{#if share === 1 && room.eligible > 0}
+					{#if nextIn > 0}
+						<span class="font-mono text-stage-xs tracking-[0.14em] whitespace-nowrap text-cream/70 uppercase tabular" in:pop={{ duration: DUR.stage }} aria-live="polite">
+							Next question in {nextIn}s
+						</span>
+					{:else if share === 1 && room.eligible > 0}
 						<span class="text-stage-sm font-semibold" style:color="var(--accent)" in:pop={{ duration: DUR.stage }}>Everyone’s in!</span>
 					{/if}
 				</div>

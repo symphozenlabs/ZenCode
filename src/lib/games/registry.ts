@@ -10,6 +10,8 @@ export interface GameDefinition {
 	tags: string[];
 	/** Admin page for the game's questions/content, if it has any. */
 	manageHref?: string;
+	/** Card art, if any. */
+	poster?: string;
 	/** Big-screen page for a running session. */
 	presenterHref: (code: string) => string;
 }
@@ -28,16 +30,17 @@ export const GAMES: GameDefinition[] = [
 		id: 'flappy',
 		name: 'Flappy Bird',
 		tagline: 'One tap. Endless bamboo. One leaderboard.',
-		description: 'An ice breaker for the whole room. Players fly as often as they like until time runs out — each new flight replaces their last score, so only the latest counts.',
+		description: 'An ice breaker for the whole room. Players fly as often as they like until time runs out — only their best flight counts.',
 		tags: ['Ice breaker', 'Arcade', 'Timed'],
 		presenterHref: (code) => `/admin/games/flappy/live/${code}`
 	},
 	{
 		id: 'symba',
-		name: 'Symba Ride',
-		tagline: 'Jetpack Symba through India’s skyline.',
-		description: 'Our mascot Symba jetpacks between skyscrapers and Indian landmarks. Same rules as Flappy Bird — fly as often as you like, only your latest flight counts — and a roar at every 10 points.',
+		name: 'Soar & Roar with Symba',
+		tagline: 'A jetpack joyride through India’s skyline.',
+		description: 'Our mascot Symba jetpacks between skyscrapers and Indian landmarks. Same rules as Flappy Bird — fly as often as you like, only your best flight counts — and a roar at every 10 points.',
 		tags: ['Ice breaker', 'Mascot', 'Timed'],
+		poster: '/games/symba/poster-sm.webp',
 		presenterHref: (code) => `/admin/games/flappy/live/${code}`
 	}
 ];
