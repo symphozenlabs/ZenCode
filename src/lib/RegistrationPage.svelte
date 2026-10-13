@@ -1,7 +1,7 @@
 <script>
   import HackathonRegistration from './HackathonRegistration.svelte';
   import PitchFestRegistration from './PitchFestRegistration.svelte';
-  import logo from '../assets/logo.png';
+  import logo from '../assets/ZENCODE_logo_white_no_hackathon.png';
 
   // Event selection state: 'hackathon' | 'pitchfest'
   let activeEvent = $state('hackathon');

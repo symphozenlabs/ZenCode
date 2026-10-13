@@ -8,7 +8,9 @@
  * to one word only.
  */
 
-export const QUESTIONS_PER_GAME = 10;
+export const QUESTIONS_PER_GAME = 15;
+/** Largest fixed question set an admin can choose or upload for one game. */
+export const MAX_FIXED_QUESTIONS = 50;
 
 export const CATEGORIES = [
 	'Programming',
@@ -101,6 +103,51 @@ export const DEFAULT_QUESTIONS: WordQuestion[] = [
 	{ id: 'embedding', word: 'EMBEDDING', category: 'Artificial Intelligence', difficulty: 'hard', description: 'A dense vector of numbers that represents a word or item so that items with similar meaning lie close together.' },
 	{ id: 'perceptron', word: 'PERCEPTRON', category: 'Artificial Intelligence', difficulty: 'hard', description: 'The simplest artificial neuron, proposed by Frank Rosenblatt in 1958, which outputs a thresholded weighted sum of its inputs.' }
 ];
+
+const WORD_RE = /^[A-Z]{3,20}$/;
+
+/**
+ * Turn a stored or uploaded question into a playable one, or explain why it
+ * can't be used. Category and difficulty fall back to defaults; the word and
+ * clue are required. Shared by the server and the admin JSON upload.
+ */
+export function parseQuestion(id: string, raw: unknown): WordQuestion | string {
+	const d = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+	const word = typeof d.word === 'string' ? d.word.trim().toUpperCase() : '';
+	const description = typeof d.description === 'string' ? d.description.trim() : '';
+	if (!WORD_RE.test(word)) return word ? `"${word}" must be 3–20 letters A–Z, no spaces or digits.` : 'Missing "word".';
+	if (!description) return `${word}: missing "description".`;
+	if (description.toUpperCase().includes(word)) return `${word}: the clue must not contain the answer.`;
+	const category = CATEGORIES.includes(d.category as never) ? (d.category as Category) : 'Programming';
+	const difficulty = DIFFICULTIES.includes(d.difficulty as never) ? (d.difficulty as Difficulty) : 'medium';
+	return { id, word, description, category, difficulty };
+}
+
+/**
+ * Validate a fixed question set (bank selection or JSON upload), keeping its
+ * order. Returns the questions, or every problem found so the admin can fix
+ * them in one go.
+ */
+export function parseQuestionSet(raw: unknown): { questions: WordQuestion[]; errors: string[] } {
+	const list = Array.isArray(raw) ? raw : raw && typeof raw === 'object' && Array.isArray((raw as { questions?: unknown }).questions) ? (raw as { questions: unknown[] }).questions : null;
+	if (!list) return { questions: [], errors: ['Expected a list of questions, e.g. [{ "word": "...", "description": "..." }].'] };
+	const errors: string[] = [];
+	const questions: WordQuestion[] = [];
+	const seen = new Set<string>();
+	list.forEach((item, i) => {
+		const id = item && typeof item === 'object' && typeof (item as { id?: unknown }).id === 'string' ? (item as { id: string }).id : `custom-${i + 1}`;
+		const q = parseQuestion(id, item);
+		if (typeof q === 'string') errors.push(`#${i + 1}: ${q}`);
+		else if (seen.has(q.word)) errors.push(`#${i + 1}: ${q.word} appears more than once.`);
+		else {
+			seen.add(q.word);
+			questions.push(q);
+		}
+	});
+	if (!list.length) errors.push('The list is empty.');
+	if (list.length > MAX_FIXED_QUESTIONS) errors.push(`Use at most ${MAX_FIXED_QUESTIONS} questions (got ${list.length}).`);
+	return { questions, errors };
+}
 
 const DIFFICULTY_ORDER: Record<Difficulty, number> = { easy: 0, medium: 1, hard: 2 };
 

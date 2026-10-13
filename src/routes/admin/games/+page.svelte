@@ -6,7 +6,7 @@
 	import { adminAuth } from '$lib/stores/admin-auth.svelte';
 	import { GAMES, gameName, presenterHref } from '$lib/games/registry';
 	import { SESSIONS, type LiveSession } from '$lib/games/tech-word-rush/types';
-	import { QUESTIONS_PER_GAME } from '$lib/games/tech-word-rush/questions';
+	import { QUESTIONS_PER_GAME, type WordQuestion } from '$lib/games/tech-word-rush/questions';
 	import { createSession } from '$lib/games/tech-word-rush/api';
 	import { createSession as createFlappySession } from '$lib/games/flappy/api';
 	import { DURATIONS as FLAP_DURATIONS, durationLabel, type FlapSession } from '$lib/games/flappy/types';
@@ -16,6 +16,8 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import SelectField from '$lib/components/ui/SelectField.svelte';
+	import Segmented from '$lib/components/live/Segmented.svelte';
+	import QuestionSetPicker, { type QuestionMode } from '$lib/components/games/QuestionSetPicker.svelte';
 	import Skeleton from '$lib/components/ui/Skeleton.svelte';
 	import StateMessage from '$lib/components/ui/StateMessage.svelte';
 	import AnimatedGrid from '$lib/components/motion/AnimatedGrid.svelte';
@@ -59,10 +61,17 @@
 	// Start a live game
 	let startFor = $state<string | null>(null);
 	const startOpen = $derived(startFor !== null);
-	let duration = $state('45');
+	let duration = $state(15);
+	let questionMode = $state<QuestionMode>('random');
+	let fixedQuestions = $state<WordQuestion[]>([]);
+	let questionProblem = $state('');
 	let flapDuration = $state('180');
 	let creating = $state(false);
 	let createError = $state('');
+
+	const wordCount = $derived(questionMode === 'random' ? QUESTIONS_PER_GAME : fixedQuestions.length);
+	// Only Tech Word Rush has a question set to get right first.
+	const blocked = $derived(!isFlyGame(startFor) && !!questionProblem);
 
 	function openStart(id: string) {
 		startFor = id;
@@ -70,6 +79,10 @@
 	}
 
 	async function start() {
+		if (blocked) {
+			createError = questionProblem;
+			return;
+		}
 		creating = true;
 		createError = '';
 		try {
@@ -79,7 +92,7 @@
 				const { code } = await createFlappySession(token, Number(flapDuration), startFor);
 				await goto(presenterHref(startFor, code));
 			} else {
-				const { code } = await createSession(token, Number(duration));
+				const { code } = await createSession(token, duration, questionMode === 'random' ? undefined : fixedQuestions);
 				await goto(presenterHref('tech-word-rush', code));
 			}
 		} catch (err) {
@@ -308,6 +321,7 @@
 
 <Modal
 	open={startOpen}
+	size={isFlyGame(startFor) ? 'md' : 'lg'}
 	title="Start {startFor ? gameName(startFor) : ''}"
 	description="Opens a lobby with a QR code for players to join."
 	onclose={() => !creating && (startFor = null)}
@@ -324,34 +338,24 @@
 			{#if createError}<p class="text-[13px] text-destructive" role="alert">{createError}</p>{/if}
 		</div>
 	{:else}
-	<div class="space-y-4">
-		<SelectField
-			label="Time per word"
-			bind:value={duration}
-			options={[
-				{ value: '30', label: '30 seconds' },
-				{ value: '45', label: '45 seconds' },
-				{ value: '60', label: '60 seconds' },
-				{ value: '90', label: '90 seconds' }
-			]}
-		/>
-		<dl class="grid grid-cols-2 gap-2 text-center">
-			<div class="rounded-md bg-muted px-2 py-2">
-				<dt class="text-[11px] text-muted-foreground">Words</dt>
-				<dd class="text-lg font-semibold tabular">{QUESTIONS_PER_GAME}</dd>
-			</div>
-			<div class="rounded-md bg-muted px-2 py-2">
-				<dt class="text-[11px] text-muted-foreground">Max XP per word</dt>
-				<dd class="text-lg font-semibold tabular">100</dd>
-			</div>
-		</dl>
-		<p class="text-[13px] text-muted-foreground">Words are picked at random from the question bank and ordered easy to hard.</p>
-		{#if createError}<p class="text-[13px] text-destructive" role="alert">{createError}</p>{/if}
-	</div>
+		<div class="space-y-5">
+			<Segmented
+				label="Time per word"
+				bind:value={duration}
+				options={[10, 15, 20, 25].map((s) => ({ value: s, label: `${s} sec` }))}
+			/>
+			<QuestionSetPicker bind:mode={questionMode} bind:questions={fixedQuestions} bind:problem={questionProblem} />
+			<p class="rounded-md bg-muted px-3 py-2 text-[13px] text-muted-foreground">
+				<span class="font-semibold text-foreground tabular">{wordCount}</span> words ·
+				<span class="font-semibold text-foreground tabular">~{Math.ceil((wordCount * duration) / 60)} min</span> answer time · up to
+				<span class="font-semibold text-foreground tabular">100 XP</span> per word
+			</p>
+			{#if createError}<p class="text-[13px] text-destructive" role="alert">{createError}</p>{/if}
+		</div>
 	{/if}
 	{#snippet footer()}
 		<Button variant="ghost" onclick={() => (startFor = null)} disabled={creating}>Cancel</Button>
-		<Button onclick={start} loading={creating}>{creating ? 'Creating game…' : 'Create lobby'}</Button>
+		<Button onclick={start} loading={creating} disabled={blocked}>{creating ? 'Creating game…' : 'Create lobby'}</Button>
 	{/snippet}
 </Modal>
 
