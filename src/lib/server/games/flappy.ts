@@ -319,7 +319,7 @@ export async function play(code: string, body: Record<string, unknown>): Promise
 				round = p.round + 1;
 				rounds = p.rounds + 1;
 				flying = true;
-				tx.update(playerRef(db, code, playerId), { flying: true, rounds: increment(1), round, flightStartedAt: now });
+				savePlayer({ flying: true, rounds: increment(1), round, flightStartedAt: now });
 			}
 		} else if (action === 'end') {
 			const r = Number(body.round);
@@ -339,9 +339,9 @@ export async function play(code: string, body: Record<string, unknown>): Promise
 				// Only a better flight changes the score (and when it was reached, for ties).
 				if (saved > p.score) {
 					score = saved;
-					tx.update(playerRef(db, code, playerId), { score: saved, scoredAt: now, flying: false, flightStartedAt: null });
+					savePlayer({ score: saved, scoredAt: now, flying: false, flightStartedAt: null });
 				} else {
-					tx.update(playerRef(db, code, playerId), { flying: false, flightStartedAt: null });
+					savePlayer({ flying: false, flightStartedAt: null });
 				}
 			}
 		}
