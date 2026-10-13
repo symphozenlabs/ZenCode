@@ -91,6 +91,8 @@ export interface SlideRun {
 	endsAt: number | null;
 	revealed: boolean;
 	showResults: boolean;
+	/** Server time the session moves on to the next slide by itself; null when it won't. */
+	advanceAt?: number | null;
 }
 
 export type LiveView = 'slide' | 'leaderboard';

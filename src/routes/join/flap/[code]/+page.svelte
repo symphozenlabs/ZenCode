@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { untrack } from 'svelte';
 	import { doc, onSnapshot } from 'firebase/firestore';
 	import { fade, fly, scale } from 'svelte/transition';
 	import { backOut } from 'svelte/easing';
@@ -12,6 +13,8 @@
 	import { isFlyGame, skinFor } from '$lib/games/flappy/skins';
 	import { isMuted, setMuted, unlockAudio } from '$lib/games/flappy/audio';
 	import FlappyGame from '$lib/components/games/flappy/FlappyGame.svelte';
+	import GamePoster from '$lib/components/games/flappy/GamePoster.svelte';
+	import PosterSplash from '$lib/components/games/flappy/PosterSplash.svelte';
 	import Leaderboard from '$lib/components/games/Leaderboard.svelte';
 	import XpCounter from '$lib/components/games/XpCounter.svelte';
 	import Confetti from '$lib/components/live/Confetti.svelte';
@@ -47,7 +50,7 @@
 
 	const status = $derived(session?.status ?? 'lobby');
 	const skin = $derived(skinFor(session?.gameType ?? (code.startsWith('ZS') ? 'symba' : 'flappy')));
-	const [titleTop, titleBottom] = $derived(skin.name.split(' '));
+	const [titleTop, titleBottom] = $derived(skin.title);
 
 	// Shared clock: ticks a few times a second for the countdown.
 	let now = $state(serverNow());
@@ -116,8 +119,11 @@
 	let starting: Promise<number | null> | null = null;
 	let saving = $state(false);
 	let saveError = $state('');
-	let lastResult = $state<{ score: number; ranked: boolean; reason: 'crash' | 'time'; capped: boolean } | null>(null);
+	/** `best`: the score that counts after this flight (higher of this one and any earlier one). */
+	let lastResult = $state<{ score: number; ranked: boolean; reason: 'crash' | 'time'; capped: boolean; best: number | null } | null>(null);
 	let muted = $state(isMuted());
+	/** The poster title card, shown once before the first flight. */
+	let splash = $state(true);
 	let liveNotice = $state(false);
 
 	function onstart() {
@@ -143,7 +149,7 @@
 	}
 
 	async function onend(score: number, reason: 'crash' | 'time') {
-		lastResult = { score, ranked, reason, capped: false };
+		lastResult = { score, ranked, reason, capped: false, best: null };
 		if (!ranked || !identity) return;
 		saving = true;
 		try {
@@ -152,7 +158,7 @@
 			const v = await play(code, identity, 'end', { round, score });
 			view = v;
 			if (v.rejected) saveError = v.rejected;
-			else if (v.saved !== undefined && v.saved < score) lastResult = { score: v.saved, ranked: true, reason, capped: true };
+			else if (v.saved !== undefined) lastResult = { score: v.saved, ranked: true, reason, capped: v.saved < score, best: v.score };
 		} catch (err) {
 			saveError = (err as Error).message || 'Couldn’t save this flight. Check your connection.';
 		} finally {
@@ -179,6 +185,25 @@
 			setTimeout(() => (liveNotice = false), 2600);
 		}
 		wasLive = isLive;
+	});
+
+	// The host restarted on the same code: drop the old entry and any flight in
+	// progress, so this phone is back to practising in the lobby.
+	let seenResets: number | null = null;
+	$effect(() => {
+		if (!session) return;
+		const r = session.resets ?? 0;
+		untrack(() => {
+			if (seenResets !== null && r !== seenResets) {
+				nudged = false;
+				ranked = false;
+				if (view) view = { ...view, score: 0, rounds: 0, flying: false };
+				flyAgain();
+				// From the results screen the game remounts; don't hand it the old "over".
+				phase = 'ready';
+			}
+			seenResets = r;
+		});
 	});
 
 	// If the presenter screen was closed, nudge the server to publish results.
@@ -266,17 +291,31 @@
 		</main>
 	{:else if !identity}
 		<!-- JOIN -->
-		<div class="absolute inset-0">{#key skin.id}<FlappyGame skin={skin.id} mode="demo" />{/key}</div>
-		<div class="absolute inset-0 bg-gradient-to-t from-stage via-stage/70 to-stage/10"></div>
-		<main class="relative mx-auto flex w-full max-w-md flex-1 flex-col justify-end px-5 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
-			<div in:fly={{ y: 24, duration: 450 }}>
+		{#if skin.poster}
+			<img src={skin.poster} alt="" class="poster-backdrop absolute inset-0 size-full object-cover" aria-hidden="true" />
+			<div class="absolute inset-0 bg-gradient-to-b from-stage/40 via-stage/75 to-stage"></div>
+		{:else}
+			<div class="absolute inset-0">{#key skin.id}<FlappyGame skin={skin.id} mode="demo" />{/key}</div>
+			<div class="absolute inset-0 bg-gradient-to-t from-stage via-stage/70 to-stage/10"></div>
+		{/if}
+		<main class="relative mx-auto flex w-full max-w-md flex-1 flex-col justify-end px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+			{#if skin.poster}
+				<div class="poster-slot flex min-h-0 flex-1 items-center justify-center py-2">
+					<GamePoster src={skin.poster} alt="{skin.name} — Symba flying a jetpack" tilt class="poster-fit" />
+				</div>
+			{/if}
+			<div in:fly={{ y: 24, duration: 450, delay: skin.poster ? 450 : 0 }}>
 				<p class="eyebrow text-green-300">Ice breaker · {code}</p>
-				<h1 class="flappy-head mt-2 font-display text-6xl leading-[0.9] font-bold tracking-tight uppercase">{titleTop}<br />{titleBottom}</h1>
+				{#if skin.poster}
+					<h1 class="sr-only">{skin.name}</h1>
+				{:else}
+					<h1 class="flappy-head mt-2 font-display text-6xl leading-[0.9] font-bold tracking-tight uppercase">{titleTop}<br />{titleBottom}</h1>
+				{/if}
 				<p class="mt-3 text-cream/80">
 					{#if live}
-						It’s live — {formatClock(timeLeft)} left. Fly as often as you like; only your <span class="font-semibold text-sun">latest</span> flight counts.
+						It’s live — {formatClock(timeLeft)} left. Fly as often as you like; only your <span class="font-semibold text-sun">best</span> flight counts.
 					{:else}
-						Fly as often as you like before time runs out. Only your <span class="font-semibold text-sun">latest</span> flight counts.
+						Fly as often as you like before time runs out. Only your <span class="font-semibold text-sun">best</span> flight counts.
 					{/if}
 				</p>
 				<form class="mt-6 space-y-3" onsubmit={submitJoin} novalidate>
@@ -364,7 +403,11 @@
 									{:else if saveError}
 										<p class="text-attention">{saveError}</p>
 									{:else}
-										<p class="font-semibold text-green-300">✓ Saved as your entry</p>
+										{#if lastResult.best === null || lastResult.score >= lastResult.best}
+											<p class="font-semibold text-green-300">✓ {lastResult.score > 0 ? 'New best — this is your score' : 'Saved'}</p>
+										{:else}
+											<p class="text-cream/80">Your best of <span class="font-semibold text-sun tabular">{lastResult.best}</span> still counts</p>
+										{/if}
 										{#if lastResult.capped}<p class="mt-1 text-xs text-cream/50">Adjusted to what was possible in the time flown.</p>{/if}
 									{/if}
 								</div>
@@ -372,7 +415,7 @@
 								{#if status === 'lobby' || live}
 									<Button variant="sun" size="xl" class="mt-4 w-full" onclick={flyAgain}><Plane class="size-4" /> Fly again</Button>
 									{#if live && lastResult?.ranked && !saveError}
-										<p class="mt-2 text-xs text-cream/50">Your next flight replaces this score.</p>
+										<p class="mt-2 text-xs text-cream/50">Only your best flight counts — go beat it.</p>
 									{/if}
 								{:else}
 									<p class="mt-4 inline-flex items-center gap-2 text-sm text-cream/70"><Trophy class="size-4 text-sun" /> Final results are on the way…</p>
@@ -383,10 +426,10 @@
 				</FlappyGame>
 				{/key}
 
-				<!-- Current entry -->
+				<!-- Best so far -->
 				{#if status === 'playing' && phase === 'ready'}
 					<div class="pointer-events-none absolute top-3 left-3 z-20 rounded-full bg-black/40 px-3 py-1 text-xs font-semibold backdrop-blur" transition:fade>
-						Your entry: <span class="text-sun tabular">{entry}</span>
+						Your best: <span class="text-sun tabular">{entry}</span>
 					</div>
 				{/if}
 
@@ -394,10 +437,14 @@
 					<div class="absolute inset-0 z-30 grid place-items-center bg-black/45 p-6 backdrop-blur-[3px]" in:fade>
 						<div class="rounded-3xl border border-white/15 bg-stage/90 p-6 text-center">
 							<p class="font-display text-4xl font-bold text-sun uppercase">Time’s up!</p>
-							<p class="mt-2 text-cream/70">Your entry: <span class="font-semibold text-cream">{entry}</span></p>
+							<p class="mt-2 text-cream/70">Your best: <span class="font-semibold text-cream">{entry}</span></p>
 							<p class="mt-4 inline-flex items-center gap-2 text-sm text-cream/60"><Spinner class="size-4" /> Waiting for the final leaderboard…</p>
 						</div>
 					</div>
+				{/if}
+
+				{#if splash && skin.poster && phase === 'ready'}
+					<PosterSplash poster={skin.poster} title={skin.name} roar={skin.milestoneSound} onclose={() => (splash = false)} />
 				{/if}
 
 				{#if liveNotice}
@@ -412,6 +459,17 @@
 </div>
 
 <style>
+	/* The poster takes whatever height the form leaves, keeping its 4:5. */
+	.poster-slot {
+		container-type: size;
+	}
+	.poster-slot :global(.poster-fit) {
+		width: min(100%, calc(100cqh * 0.8));
+	}
+	.poster-backdrop {
+		filter: blur(26px) saturate(1.4) brightness(0.6);
+		transform: scale(1.15);
+	}
 	.flappy-head {
 		-webkit-text-stroke: 2px rgba(40, 22, 6, 0.8);
 		paint-order: stroke fill;

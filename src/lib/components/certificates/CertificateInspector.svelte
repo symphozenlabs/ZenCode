@@ -490,6 +490,17 @@
 				{design.page.width} × {design.page.height} px at 96 dpi. Elements keep their place when you switch.
 			</p>
 		</section>
+		{#if design.page.html}
+			<section>
+				<span class="label">HTML certificate</span>
+				<p class="hint">
+					The uploaded HTML is the page and keeps its own fonts and styles. Fields written into it, like
+					<code>{'{{participant_name}}'}</code>, fill in for each participant in that same style;
+					<code>{'{{qr_code}}'}</code> places the verification QR. Anything added here sits on top.
+				</p>
+				<button type="button" class="wide ghost" onclick={() => onpage({ html: null })}>Remove the HTML page</button>
+			</section>
+		{/if}
 		<section>
 			<span class="label">Background</span>
 			<div class="row">

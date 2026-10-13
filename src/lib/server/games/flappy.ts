@@ -125,7 +125,7 @@ export async function createSession(createdBy: string, duration: number, game: u
 }
 
 /**
- * Standard competition ranking (1, 2, 2, 4) on each player's latest score.
+ * Standard competition ranking (1, 2, 2, 4) on each player's best score.
  * Ties are listed by who reached the score first.
  */
 export function rankPlayers(players: readonly (FlapPlayer & { id: string })[]): FlapRankEntry[] {
@@ -143,12 +143,46 @@ async function writeRanking(db: Firestore, code: string) {
 	const snap = await getDocs(collection(db, SESSIONS, code, 'players'));
 	const leaderboard = rankPlayers(snap.docs.map((d) => ({ id: d.id, ...(d.data() as FlapPlayer) }))).slice(0, 500);
 	const top = leaderboard[0];
-	await updateDoc(sessionRef(db, code), {
-		leaderboard,
-		playerCount: snap.size,
-		winner: top && top.score > 0 ? { name: top.name, score: top.score } : null,
-		ranking: false
+	await runTransaction(db, async (tx) => {
+		// Restarted while the last flights were landing: these results are stale.
+		if (sessionData(await tx.get(sessionRef(db, code))).status !== 'finished') return;
+		tx.update(sessionRef(db, code), {
+			leaderboard,
+			playerCount: snap.size,
+			winner: top && top.score > 0 ? { name: top.name, score: top.score } : null,
+			ranking: false
+		});
 	});
+}
+
+/**
+ * Back to the lobby on the same code: the QR on screen and every phone stay
+ * valid, players keep their names, and all scores start again from zero.
+ */
+async function restart(db: Firestore, code: string) {
+	// Close flights first, so no new one starts while the scores are cleared.
+	await runTransaction(db, async (tx) => {
+		sessionData(await tx.get(sessionRef(db, code)));
+		tx.update(sessionRef(db, code), {
+			status: 'lobby',
+			startedAt: null,
+			endedAt: null,
+			timerEndsAt: null,
+			leaderboard: [],
+			winner: null,
+			ranking: false,
+			resets: increment(1)
+		});
+	});
+	const players = await getDocs(collection(db, SESSIONS, code, 'players'));
+	// `round` is kept: it only grows, so a flight from before the restart can't be saved.
+	const cleared: Partial<FlapPlayer> = { score: 0, scoredAt: null, rounds: 0, flying: false, flightStartedAt: null };
+	for (let i = 0; i < players.docs.length; i += 450) {
+		const batch = writeBatch(db);
+		for (const d of players.docs.slice(i, i + 450)) batch.update(d.ref, cleared);
+		await batch.commit();
+	}
+	await updateDoc(sessionRef(db, code), { playerCount: players.size });
 }
 
 /**
@@ -171,7 +205,7 @@ async function finish(db: Firestore, code: string) {
 }
 
 export async function control(code: string, action: FlapControl): Promise<{ now: number }> {
-	if (!['sync', 'start', 'finish'].includes(action)) error(400, 'Unknown action.');
+	if (!['sync', 'start', 'finish', 'restart'].includes(action)) error(400, 'Unknown action.');
 	const db = await adminDb();
 	if (action === 'sync') {
 		sessionData(await getDoc(sessionRef(db, code)));
@@ -183,6 +217,8 @@ export async function control(code: string, action: FlapControl): Promise<{ now:
 			const now = Date.now();
 			tx.update(sessionRef(db, code), { status: 'playing', startedAt: now, timerEndsAt: now + s.duration * 1000, playerCount });
 		});
+	} else if (action === 'restart') {
+		await restart(db, code);
 	} else {
 		await finish(db, code);
 	}
@@ -279,12 +315,11 @@ export async function play(code: string, body: Record<string, unknown>): Promise
 			if (!open) {
 				rejected = s.status === 'lobby' ? 'The game hasn’t started yet.' : 'Time’s up — no more flights.';
 			} else {
-				// A new flight replaces the previous score.
+				// The best score so far stands while the new flight is in the air.
 				round = p.round + 1;
-				score = 0;
 				rounds = p.rounds + 1;
 				flying = true;
-				savePlayer({ score: 0, scoredAt: null, flying: true, rounds: increment(1), round, flightStartedAt: now });
+				tx.update(playerRef(db, code, playerId), { flying: true, rounds: increment(1), round, flightStartedAt: now });
 			}
 		} else if (action === 'end') {
 			const r = Number(body.round);
@@ -300,9 +335,14 @@ export async function play(code: string, body: Record<string, unknown>): Promise
 				const flown = Math.min(now, endsAt + GRACE_MS) - p.flightStartedAt + LATENCY_MS;
 				const cap = maxScore(flown) + 1;
 				saved = Math.max(0, Math.min(Number.isFinite(reported) ? reported : 0, cap, MAX_REPORTED));
-				score = saved;
 				flying = false;
-				savePlayer({ score: saved, scoredAt: now, flying: false, flightStartedAt: null });
+				// Only a better flight changes the score (and when it was reached, for ties).
+				if (saved > p.score) {
+					score = saved;
+					tx.update(playerRef(db, code, playerId), { score: saved, scoredAt: now, flying: false, flightStartedAt: null });
+				} else {
+					tx.update(playerRef(db, code, playerId), { flying: false, flightStartedAt: null });
+				}
 			}
 		}
 

@@ -4,7 +4,7 @@
 	import { flip } from 'svelte/animate';
 	import { fade, fly, scale } from 'svelte/transition';
 	import { backOut } from 'svelte/easing';
-	import { Users, X, Maximize, Minimize, Play, Flag, CloudOff, ArrowLeft, Plane, Trophy, Timer } from '@lucide/svelte';
+	import { Users, X, Maximize, Minimize, Play, Flag, CloudOff, ArrowLeft, Plane, Trophy, Timer, RotateCcw } from '@lucide/svelte';
 	import { db } from '$lib/firebase/client';
 	import { adminAuth } from '$lib/stores/admin-auth.svelte';
 	import { serverNow } from '$lib/games/tech-word-rush/api';
@@ -20,6 +20,7 @@
 	import Leaderboard from '$lib/components/games/Leaderboard.svelte';
 	import XpCounter from '$lib/components/games/XpCounter.svelte';
 	import FlappyGame from '$lib/components/games/flappy/FlappyGame.svelte';
+	import GamePoster from '$lib/components/games/flappy/GamePoster.svelte';
 	import Confetti from '$lib/components/live/Confetti.svelte';
 
 	const code = $derived((page.params.code ?? '').toUpperCase());
@@ -82,7 +83,7 @@
 
 	const status = $derived(session?.status ?? 'lobby');
 	const skin = $derived(skinFor(session?.gameType ?? (code.startsWith('ZS') ? 'symba' : 'flappy')));
-	const [titleTop, titleBottom] = $derived(skin.name.split(' '));
+	const [titleTop, titleBottom] = $derived(skin.title);
 	const endsAt = $derived(session?.timerEndsAt ?? null);
 	const timeLeft = $derived(endsAt ? Math.max(0, endsAt - now) : 0);
 	const fraction = $derived(session && endsAt ? Math.min(1, timeLeft / (session.duration * 1000)) : 1);
@@ -98,7 +99,7 @@
 		}
 	});
 
-	// ── Live standings (latest flight per player) ────────────────────────
+	// ── Live standings (best flight per player) ────────────────────────
 	const standings = $derived(
 		[...players].sort((a, b) => b.score - a.score || (a.scoredAt ?? Infinity) - (b.scoredAt ?? Infinity) || a.joinedAt - b.joinedAt)
 	);
@@ -109,6 +110,7 @@
 
 	// ── Chrome ───────────────────────────────────────────────────────────
 	let confirmEnd = $state(false);
+	let confirmRestart = $state(false);
 	let fullscreen = $state(false);
 	function toggleFullscreen() {
 		if (document.fullscreenElement) document.exitFullscreen();
@@ -167,13 +169,27 @@
 					<div class="flex flex-col [grid-area:1/1]" in:fly={{ y: 24, duration: 420, delay: 120 }} out:fade={{ duration: 120 }}>
 						{#if status === 'lobby'}
 							<!-- LOBBY -->
-							<div class="m-auto grid w-full max-w-6xl items-center gap-10 lg:grid-cols-[1.15fr_1fr]">
+							<div
+								class="m-auto grid w-full items-center gap-10 {skin.poster
+									? 'max-w-7xl lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)_minmax(0,0.9fr)] lg:gap-12'
+									: 'max-w-6xl lg:grid-cols-[1.15fr_1fr]'}"
+							>
+								{#if skin.poster}
+									<div class="lobby-poster mx-auto w-full">
+										<GamePoster src={skin.poster} alt="{skin.name} — Symba flying a jetpack" tilt delay={150} />
+									</div>
+								{/if}
 								<div class="text-center lg:text-left">
 									<p class="eyebrow text-green-300">Ice breaker</p>
-									<h1 class="flappy-head mt-3 font-display text-6xl leading-[0.88] font-bold tracking-tight uppercase md:text-8xl">{titleTop}<br />{titleBottom}</h1>
+									{#if skin.poster}
+										<h1 class="lobby-in mt-3 font-display text-3xl font-bold tracking-tight text-balance uppercase md:text-4xl" style:--d="350ms">{skin.name.replace(' & ', ' and ')}</h1>
+										<p class="lobby-in mt-2 text-xl text-balance text-cream/85 md:text-2xl" style:--d="450ms">{skin.tagline}</p>
+									{:else}
+										<h1 class="flappy-head mt-3 font-display text-6xl leading-[0.88] font-bold tracking-tight uppercase md:text-8xl">{titleTop}<br />{titleBottom}</h1>
+									{/if}
 									<p class="mt-5 max-w-lg text-lg text-cream/85 md:text-xl lg:max-w-none">
-										Fly as often as you like for <span class="font-semibold text-sun">{durationLabel(session.duration)}</span>. Every new flight replaces your last score —
-										<span class="font-semibold text-sun">only your latest counts.</span>
+										Fly as often as you like for <span class="font-semibold text-sun">{durationLabel(session.duration)}</span>. Fly again to beat it —
+										<span class="font-semibold text-sun">only your best flight counts.</span>
 									</p>
 									<div class="mt-8">
 										<p class="eyebrow text-cream/60">Game code</p>
@@ -231,7 +247,7 @@
 											<div class="w-28 shrink-0 rounded-xl bg-white p-1.5"><QrCode value={joinUrl} label="Scan to join game {code}" /></div>
 											<div>
 												<p class="font-mono text-4xl font-bold tracking-[0.15em] text-sun">{code}</p>
-												<p class="mt-1 text-sm text-cream/60">Only your latest flight counts — fly again to beat it, but you’ll lose the old score.</p>
+												<p class="mt-1 text-sm text-cream/60">Only your best flight counts — fly again to beat it, you can’t lose points.</p>
 											</div>
 										</div>
 									</div>
@@ -328,9 +344,11 @@
 							<Play class="size-4" />{players.length ? `Start · ${durationLabel(session.duration)}` : 'Waiting for players…'}
 						</Button>
 					{:else if status === 'playing'}
+						<Button variant="stage" size="lg" onclick={() => (confirmRestart = true)} loading={busy === 'restart'}><RotateCcw class="size-4" /> Restart</Button>
 						<Button variant="stage" size="lg" onclick={() => (confirmEnd = true)} loading={busy === 'finish'}><Flag class="size-4" /> End early</Button>
 					{:else}
-						<Button variant="sun" size="lg" href="/admin/games"><ArrowLeft class="size-4" /> Back to games</Button>
+						<Button variant="stage" size="lg" href="/admin/games"><ArrowLeft class="size-4" /> Back to games</Button>
+						<Button variant="sun" size="lg" onclick={() => (confirmRestart = true)} loading={busy === 'restart'}><RotateCcw class="size-4" /> Play again</Button>
 					{/if}
 				</div>
 			</div>
@@ -358,7 +376,46 @@
 	{/snippet}
 </Modal>
 
+<Modal
+	open={confirmRestart}
+	title={status === 'playing' ? 'Restart the game?' : 'Play again?'}
+	description="Back to the lobby with the same code. Players stay joined, every score goes back to zero."
+	onclose={() => (confirmRestart = false)}
+>
+	<p class="text-sm text-muted-foreground">{status === 'playing' ? 'Flights in the air now won’t count.' : 'This leaderboard is cleared.'}</p>
+	{#snippet footer()}
+		<Button variant="ghost" onclick={() => (confirmRestart = false)}>Cancel</Button>
+		<Button
+			variant="destructive"
+			loading={busy === 'restart'}
+			onclick={async () => {
+				confirmRestart = false;
+				await run('restart');
+			}}><RotateCcw class="size-4" /> Restart</Button
+		>
+	{/snippet}
+</Modal>
+
 <style>
+	/* Tall as the screen allows, keeping the poster's 4:5. */
+	.lobby-poster {
+		max-width: min(100%, 64vh * 0.8);
+	}
+	.lobby-in {
+		animation: lobby-in 0.8s cubic-bezier(0.16, 1, 0.3, 1) var(--d, 0ms) both;
+	}
+	@keyframes lobby-in {
+		from {
+			opacity: 0;
+			transform: translateY(16px);
+			filter: blur(6px);
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.lobby-in {
+			animation: none;
+		}
+	}
 	.flappy-head {
 		-webkit-text-stroke: 2px rgba(40, 22, 6, 0.8);
 		paint-order: stroke fill;

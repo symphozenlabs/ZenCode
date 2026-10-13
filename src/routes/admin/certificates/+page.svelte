@@ -1,14 +1,17 @@
 <script>
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { Upload, Plus, CloudOff, RotateCcw } from '@lucide/svelte';
+	import { Upload, Plus, CloudOff, RotateCcw, FileCode, TriangleAlert } from '@lucide/svelte';
 	import PageHeader from '$lib/components/admin/PageHeader.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Spinner from '$lib/components/ui/Spinner.svelte';
 	import StateMessage from '$lib/components/ui/StateMessage.svelte';
+	import Modal from '$lib/components/ui/Modal.svelte';
+	import Field from '$lib/components/ui/Field.svelte';
 	import CertScope from '$lib/components/certificates/CertScope.svelte';
 	import CertificatePage from '$lib/components/certificates/CertificatePage.svelte';
-	import { SAMPLE_VALUES, STARTERS } from '$lib/certificates/design.js';
+	import { MERGE_FIELDS, SAMPLE_VALUES, STARTERS, uploadedHtmlDesign } from '$lib/certificates/design.js';
+	import { applyFields, guessName, importHtml } from '$lib/certificates/htmlImport.js';
 	import { readImage } from '$lib/certificates/imageData.js';
 	import { createTemplate, deleteTemplate, listTemplates } from '$lib/certificates/store';
 	import { certToast as appState } from '$lib/certificates/toast.svelte';
@@ -23,6 +26,8 @@
 	let dragging = $state(false);
 	/** @type {HTMLInputElement | undefined} */
 	let fileInput = $state();
+	/** @type {HTMLInputElement | undefined} */
+	let htmlInput = $state();
 
 	// Thumbnails for the starter picker, built once.
 	const starters = STARTERS.map((s) => ({ ...s, design: s.build() }));
@@ -46,11 +51,13 @@
 	onMount(load);
 
 	async function create(body) {
-		creating = body.upload ? 'upload' : (body.starter ?? body.copyOf ?? 'new');
+		creating = body.upload ? 'upload' : body.html ? 'html' : (body.starter ?? body.copyOf ?? 'new');
 		try {
 			const template = await createTemplate(body);
 			if (body.upload) {
 				appState.showToast('Drag the name and QR code to where they belong.', 'success');
+			} else if (body.html) {
+				appState.showToast('HTML certificate ready. Drag the QR code (and anything else added) into place.', 'success');
 			}
 			await goto(`/admin/certificates/${template.id}`);
 		} catch (error) {
@@ -75,6 +82,48 @@
 			appState.showToast(error.message || 'Could not read that image.', 'error');
 			creating = '';
 		}
+	}
+
+	// ── HTML certificates ──
+	// The HTML becomes the page and keeps its own fonts and styles; the texts
+	// chosen below become merge fields, so each participant's details appear in
+	// exactly that text's style.
+	const MAPPABLE = ['participant_name', 'team_name', 'award', 'event_title', 'event_dates', 'issue_date', 'certificate_id'];
+	const fieldLabel = (key) => MERGE_FIELDS.find((f) => f.key === key)?.label ?? key;
+
+	/** @type {null | { html: string, viewW: number, viewH: number, crop: { x: number, y: number, w: number, h: number }, texts: { text: string, size: number }[], warnings: string[], name: string }} */
+	let imported = $state(null);
+	/** @type {Record<string, string>} */
+	let mapping = $state({});
+
+	async function uploadHtml(files) {
+		if (!files?.length || creating) return;
+		creating = 'html';
+		try {
+			const result = await importHtml([...files]);
+			mapping = Object.fromEntries(MAPPABLE.map((k) => [k, k === 'participant_name' ? guessName(result.texts) : '']));
+			imported = result;
+		} catch (error) {
+			appState.showToast(error.message || 'Could not read that HTML file.', 'error');
+		} finally {
+			creating = '';
+		}
+	}
+
+	/** The certificate as it will be, with the sample participant filled in. */
+	const preview = $derived.by(() => {
+		if (!imported) return null;
+		const { html, missing } = applyFields(imported.html, mapping);
+		return { design: uploadedHtmlDesign({ ...imported, html }), missing };
+	});
+	const alreadyThere = (key) => imported?.html.includes(`{{${key}}}`);
+
+	async function createFromHtml() {
+		if (!imported) return;
+		const { html } = applyFields(imported.html, mapping);
+		const { viewW, viewH, crop, name } = imported;
+		await create({ html: { html, viewW, viewH, crop }, name });
+		imported = null;
 	}
 
 	function onDrop(event) {
@@ -113,7 +162,10 @@
 >
 	{#snippet actions()}
 		<Button variant="outline" disabled={Boolean(creating)} onclick={() => fileInput?.click()}>
-			<Upload class="size-4" /> Upload certificate
+			<Upload class="size-4" /> Upload image
+		</Button>
+		<Button variant="outline" disabled={Boolean(creating)} loading={creating === 'html' && !imported} onclick={() => htmlInput?.click()}>
+			<FileCode class="size-4" /> Upload HTML
 		</Button>
 		<Button onclick={() => (pickerOpen = !pickerOpen)}><Plus class="size-4" /> New certificate</Button>
 	{/snippet}
@@ -129,6 +181,20 @@
 		aria-hidden="true"
 		onchange={(e) => {
 			upload(e.currentTarget.files?.[0]);
+			e.currentTarget.value = '';
+		}}
+	/>
+
+	<input
+		bind:this={htmlInput}
+		type="file"
+		multiple
+		accept=".html,.htm,text/html,.css,image/*,.woff,.woff2,.ttf,.otf"
+		class="sr-only"
+		tabindex="-1"
+		aria-hidden="true"
+		onchange={(e) => {
+			uploadHtml(e.currentTarget.files);
 			e.currentTarget.value = '';
 		}}
 	/>
@@ -174,6 +240,18 @@
 					<span class="starter-desc">
 						Use a sponsor's or partner's certificate (PNG, JPEG or WebP). We add the participant's name
 						and a verification QR code.
+					</span>
+				</button>
+				<button type="button" class="starter" disabled={Boolean(creating)} onclick={() => htmlInput?.click()}>
+					<span class="thumb upload-drop">
+						<span class="material-symbols-outlined">html</span>
+						<span>Choose the .html file — and its images or fonts, if they are separate files</span>
+						{#if creating === 'html'}<span class="thumb-busy"><span class="spinner"></span></span>{/if}
+					</span>
+					<span class="starter-name">Upload an HTML certificate</span>
+					<span class="starter-desc">
+						Keeps your HTML's fonts and styles. Pick the text that is the participant's name and it fills
+						in for everyone in that same style.
 					</span>
 				</button>
 				{#each starters as s (s.id)}
@@ -273,9 +351,88 @@
 		</section>
 	{/if}
 </div>
+
+<Modal
+	open={Boolean(imported)}
+	title="Set up your HTML certificate"
+	description="Choose which text on it changes for each participant. The new text keeps that text's font, size and colour."
+	size="lg"
+	onclose={() => creating !== 'html' && (imported = null)}
+>
+	{#if imported && preview}
+		<div class="html-setup">
+			<div class="html-preview">
+				<CertificatePage design={preview.design} values={SAMPLE_VALUES} fit />
+			</div>
+			<p class="text-[12px] text-muted-foreground">Preview with a sample participant, {SAMPLE_VALUES.participant_name}.</p>
+
+			<datalist id="html-texts">
+				{#each imported.texts as t (t.text)}<option value={t.text}></option>{/each}
+			</datalist>
+			<div class="grid gap-3 sm:grid-cols-2">
+				{#each MAPPABLE as key (key)}
+					{#if alreadyThere(key)}
+						<p class="rounded-md bg-muted px-3 py-2 text-[13px]">
+							<span class="font-medium">{fieldLabel(key)}</span> — already in the HTML as <code>{`{{${key}}}`}</code>
+						</p>
+					{:else}
+						<Field
+							label={fieldLabel(key) + (key === 'participant_name' ? '' : ' (optional)')}
+							bind:value={mapping[key]}
+							list="html-texts"
+							placeholder="Text on the certificate to replace"
+							error={preview.missing.includes(key) ? 'That text isn’t on the certificate.' : undefined}
+						/>
+					{/if}
+				{/each}
+			</div>
+			<ul class="space-y-1 text-[12.5px] text-muted-foreground">
+				{#if !alreadyThere('participant_name') && !mapping.participant_name?.trim()}
+					<li>• No name text chosen: a name box is added on top instead, for you to style and drag.</li>
+				{/if}
+				{#if !alreadyThere('qr_code')}
+					<li>• A verification QR code is added for you to drag into place. (Or write <code>{'{{qr_code}}'}</code> inside a sized box in the HTML.)</li>
+				{/if}
+			</ul>
+			{#if imported.warnings.length}
+				<div class="flex gap-2 rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-[12.5px] text-orange-900" role="status">
+					<TriangleAlert class="mt-0.5 size-4 shrink-0" />
+					<div>
+						<p class="font-medium">Some files couldn’t be included</p>
+						<ul class="mt-0.5">{#each imported.warnings.slice(0, 6) as w (w)}<li>{w}</li>{/each}</ul>
+						<p class="mt-1">Upload them together with the HTML file (select them all at once) to include them.</p>
+					</div>
+				</div>
+			{/if}
+		</div>
+	{/if}
+	{#snippet footer()}
+		<Button variant="ghost" onclick={() => (imported = null)} disabled={creating === 'html'}>Cancel</Button>
+		<Button onclick={createFromHtml} loading={creating === 'html'}>Create certificate</Button>
+	{/snippet}
+</Modal>
 </CertScope>
 
 <style>
+	.html-setup {
+		display: flex;
+		flex-direction: column;
+		gap: 0.85rem;
+	}
+
+	.html-preview {
+		position: relative;
+		aspect-ratio: 3 / 2;
+		padding: 0.75rem;
+		border: 1px solid var(--color-line, var(--color-border));
+		border-radius: 0.75rem;
+		background: var(--color-surface-2, var(--color-muted));
+	}
+
+	.html-preview :global(.cp-frame) {
+		box-shadow: 0 4px 18px rgb(0 0 0 / 0.12);
+	}
+
 	/* Same footprint as a starter thumbnail, so the row lines up. */
 	.upload-drop {
 		align-content: center;

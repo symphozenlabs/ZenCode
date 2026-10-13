@@ -4,6 +4,7 @@
 	import { certToast as appState } from '$lib/certificates/toast.svelte';
 	import { saveTemplate } from '$lib/certificates/store';
 	import CertificateElement from './CertificateElement.svelte';
+	import CertificateHtml from './CertificateHtml.svelte';
 	import CertificateInspector from './CertificateInspector.svelte';
 	import {
 		MERGE_FIELDS,
@@ -765,6 +766,7 @@
 							? `url(${design.page.backgroundImage})`
 							: 'none'}
 					>
+						{#if design.page.html}<CertificateHtml page={design.page} {values} {qrText} />{/if}
 						{#each design.elements as el (el.id)}
 							{#if el.id !== editingId}
 								<CertificateElement {el} {values} {qrText} editing />

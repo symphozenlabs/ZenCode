@@ -17,7 +17,7 @@
 	 * Taps are read on pointerdown (not click) for the lowest latency.
 	 */
 	interface Props {
-		/** Which game's look: Flappy Bird or Symba Ride. */
+		/** Which game's look: Flappy Bird or Soar & Roar. */
 		skin?: FlyGame;
 		mode?: 'play' | 'demo';
 		/** False blocks starting a new flight (e.g. time is up). */

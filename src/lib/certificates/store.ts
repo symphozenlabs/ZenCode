@@ -27,6 +27,7 @@ import {
 	normaliseDesign,
 	parseDesign,
 	uploadedDesign,
+	uploadedHtmlDesign,
 	valuesFor
 } from './design.js';
 import { certificatePdf } from './render.js';
@@ -176,16 +177,24 @@ export async function createTemplate({
 	name,
 	starter = 'classic',
 	copyOf = null,
-	upload = null
+	upload = null,
+	html = null
 }: {
 	name?: string;
 	starter?: string;
 	copyOf?: string | null;
 	upload?: { src: string; width: number; height: number } | null;
+	/** An uploaded HTML certificate, from importHtml + applyFields. */
+	html?: { html: string; viewW: number; viewH: number; crop: { x: number; y: number; w: number; h: number } } | null;
 }): Promise<CertificateTemplate> {
 	let design: Design;
 	let baseName: string;
-	if (upload) {
+	if (html) {
+		const result = normaliseDesign(uploadedHtmlDesign(html));
+		if (!result.ok) throw new Error(result.errors.join(' '));
+		design = result.design as Design;
+		baseName = 'HTML certificate';
+	} else if (upload) {
 		const result = normaliseDesign(uploadedDesign(upload));
 		if (!result.ok) throw new Error(result.errors.join(' '));
 		design = result.design as Design;

@@ -73,19 +73,22 @@
 		run: () => void;
 	}
 
-	/** The one obvious next step, bound to Space. */
+	/**
+	 * The one obvious next step, bound to Space. The room runs itself — the timer
+	 * starts after the title card, the answer is revealed when everyone is in or
+	 * time runs out, and the next slide follows 5s later — so once a slide is
+	 * answered, Space is for the leaderboard.
+	 */
 	const primary = $derived.by((): Primary | null => {
 		if (!session) return null;
 		if (session.status === 'lobby') return { label: 'Start session', icon: Play, run: () => room.act({ t: 'start_session' }) };
 		if (!live || !slide || !run) return null;
-		const scored = SLIDE_META[slide.kind].scored;
 		if (live.view === 'leaderboard') return isLast ? null : { label: 'Next slide', icon: ChevronRight, run: next };
 		if (run.phase === 'ready') return { label: 'Start timer', icon: Timer, run: () => room.act({ t: 'start_timer' }) };
 		if (run.phase === 'open') return { label: slide.timeLimit > 0 ? 'Close responses' : 'Close voting', icon: Hand, run: () => room.act({ t: 'close_responses' }) };
 		if (hasAnswer(slide) && !run.revealed) return { label: 'Reveal answer', icon: Sparkles, run: reveal };
-		if (scored && run.revealed) return { label: 'Show leaderboard', icon: Trophy, run: toggleLeaderboard };
-		if (!run.showResults) return { label: 'Show results', icon: Eye, run: toggleResults };
-		return isLast ? { label: 'Show leaderboard', icon: Trophy, run: toggleLeaderboard } : { label: 'Next slide', icon: ChevronRight, run: next };
+		if (SLIDE_META[slide.kind].input !== 'none' || isLast) return { label: 'Show leaderboard', icon: Trophy, run: toggleLeaderboard };
+		return { label: 'Next slide', icon: ChevronRight, run: next };
 	});
 
 	function onkeydown(e: KeyboardEvent) {

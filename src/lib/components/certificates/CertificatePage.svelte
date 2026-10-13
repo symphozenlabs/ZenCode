@@ -1,5 +1,6 @@
 <script>
 	import CertificateElement from './CertificateElement.svelte';
+	import CertificateHtml from './CertificateHtml.svelte';
 
 	/**
 	 * A whole certificate, drawn at `scale` (1 = true size, 96 dpi). Used for
@@ -45,6 +46,7 @@
 			style:background-color={page.background}
 			style:background-image={page.backgroundImage ? `url(${page.backgroundImage})` : 'none'}
 		>
+			{#if page.html}<CertificateHtml {page} {values} {qrText} />{/if}
 			{#each design.elements as el (el.id)}
 				<CertificateElement {el} {values} {qrText} />
 			{/each}

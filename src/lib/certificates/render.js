@@ -1,5 +1,6 @@
 import QRCode from 'qrcode';
 import { FONTS_HREF, fillFields } from './design.js';
+import { htmlLayerImage, layerBox } from './htmlCert.js';
 
 /**
  * Draws a certificate onto a canvas, the way CertificatePage lays it out in
@@ -163,6 +164,18 @@ export async function drawCertificate(design, values, qrText, scale = 2) {
 	ctx.fillStyle = page.background || '#ffffff';
 	ctx.fillRect(0, 0, page.width, page.height);
 	if (page.backgroundImage) drawFitted(ctx, images.get(page.backgroundImage), 0, 0, page.width, page.height, 'cover');
+	if (page.html) {
+		// An uploaded HTML certificate, laid out as uploaded and cropped to its box.
+		const layer = page.html;
+		const box = layerBox(page, layer);
+		const img = await htmlLayerImage(layer, values, qrText);
+		ctx.save();
+		ctx.beginPath();
+		ctx.rect(box.left, box.top, box.w, box.h);
+		ctx.clip();
+		ctx.drawImage(img, box.left - layer.crop.x * box.k, box.top - layer.crop.y * box.k, layer.viewW * box.k, layer.viewH * box.k);
+		ctx.restore();
+	}
 
 	for (const el of design.elements) {
 		if (el.hidden) continue;

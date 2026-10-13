@@ -11,7 +11,7 @@
 	/**
 	 * Fallback for players who can't scan: type the code shown on screen.
 	 * One door for all: a Tech Word Rush game code (ZC7K42), a Flappy Bird or
-	 * Symba Ride code (ZF7K42 / ZS7K42) or a live session's 6-digit code (482 913).
+	 * Soar & Roar code (ZF7K42 / ZS7K42) or a live session's 6-digit code (482 913).
 	 */
 	let code = $state(page.url.searchParams.get('code') ?? '');
 	let error = $state('');

@@ -473,6 +473,71 @@ describe('running a quiz slide', () => {
 	});
 });
 
+describe('running by itself', () => {
+	it('reveals once every connected phone has answered', async () => {
+		const { h, code } = await liveRoom();
+		const a = await player(code, 'Ada');
+		const b = await player(code, 'Bob');
+		await start(h);
+		h.send({ t: 'start_timer' });
+		const quizId = (await a.c.next('player_state', (m) => m.state.phase === 'open')).state.slide!.id;
+		a.c.send(tap(quizId, 'paris'));
+		await a.c.next('response_ack');
+		await new Promise((r) => setTimeout(r, 1300));
+		expect(h.messages.some((m) => m.t === 'answer_reveal')).toBe(false); // Bob is still thinking
+		b.c.send(tap(quizId, 'rome'));
+		expect((await h.next('answer_reveal', undefined, 3000)).slideId).toBe(quizId);
+	});
+
+	it('reveals when the only phone yet to answer leaves', async () => {
+		const { h, code } = await liveRoom();
+		const a = await player(code, 'Ada');
+		const b = await player(code, 'Bob');
+		await start(h);
+		h.send({ t: 'start_timer' });
+		const quizId = (await a.c.next('player_state', (m) => m.state.phase === 'open')).state.slide!.id;
+		a.c.send(tap(quizId, 'paris'));
+		await a.c.next('response_ack');
+		b.c.close();
+		expect((await h.next('answer_reveal', undefined, 3000)).slideId).toBe(quizId);
+	});
+
+	it('moves to the next slide 5 seconds after the reveal', { timeout: 10_000 }, async () => {
+		const { h, code } = await liveRoom();
+		const a = await player(code, 'Ada');
+		await start(h);
+		h.send({ t: 'start_timer' });
+		const quizId = (await a.c.next('player_state', (m) => m.state.phase === 'open')).state.slide!.id;
+		h.send({ t: 'reveal_answer' });
+		const revealed = await h.next('slide_state', (m) => !!m.live?.runs[quizId]?.revealed);
+		const advanceAt = revealed.live!.runs[quizId].advanceAt!;
+		expect(advanceAt - revealed.serverNow).toBeGreaterThan(4500);
+		const moved = await h.next('slide_state', (m) => m.live?.index === 1, 7000);
+		expect(moved.serverNow).toBeGreaterThanOrEqual(advanceAt);
+		expect(moved.live!.runs[quizId].advanceAt).toBeNull();
+	});
+
+	it('stays on the leaderboard once the host shows it', async () => {
+		const { h } = await liveRoom();
+		await start(h);
+		h.send({ t: 'start_timer' });
+		h.send({ t: 'reveal_answer' });
+		await h.next('slide_state', (m) => Object.values(m.live!.runs)[0].advanceAt != null);
+		h.send({ t: 'show_leaderboard', show: true });
+		const board = await h.next('slide_state', (m) => m.live?.view === 'leaderboard');
+		expect(Object.values(board.live!.runs)[0].advanceAt).toBeNull();
+	});
+
+	it('does not move on after the last slide', async () => {
+		const { h } = await liveRoom([quizSlide()]);
+		await start(h);
+		h.send({ t: 'start_timer' });
+		h.send({ t: 'reveal_answer' });
+		const last = await h.next('slide_state', (m) => Object.values(m.live!.runs)[0].revealed);
+		expect(Object.values(last.live!.runs)[0].advanceAt).toBeNull();
+	});
+});
+
 describe('running a poll slide', () => {
 	it('opens immediately and streams results to the host', async () => {
 		const { h, code } = await liveRoom([pollSlide()]);

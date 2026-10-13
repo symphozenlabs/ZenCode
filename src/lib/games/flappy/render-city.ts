@@ -1,4 +1,5 @@
 import { GROUND_Y, PIPE_W, WORLD_H } from './engine';
+import { createBannerPlane } from './banner-plane';
 import {
 	drawClouds,
 	drawParticles,
@@ -15,7 +16,7 @@ import {
 } from './render';
 
 /**
- * Symba Ride: the same game drawn as an Indian city. Pipes become glass
+ * Soar & Roar: the same game drawn as an Indian city. Pipes become glass
  * towers — one bright, sharp-edged style, so they never blend into the
  * hazy skyline behind (which carries the landmark silhouettes). The ground is
  * a road with a striped kerb. The mascot is drawn from five poses, chosen
@@ -67,6 +68,7 @@ export function createCityRenderer(canvas: HTMLCanvasElement) {
 	let vignette: CanvasGradient | null = null;
 	let tower: { body: HTMLCanvasElement; lights: HTMLCanvasElement } | null = null;
 	const sprites = new Map<Pose, HTMLImageElement>(POSES.map((p) => [p, loadImage(`/games/symba/${p}.webp`)]));
+	const bannerPlane = createBannerPlane();
 
 	function makeCanvas(w: number, h: number, scale: number) {
 		const c = document.createElement('canvas');
@@ -595,6 +597,7 @@ export function createCityRenderer(canvas: HTMLCanvasElement) {
 		// Haze over the whole backdrop, so the foreground towers pop.
 		ctx.fillStyle = rgb(p.skyLow, 0.16);
 		ctx.fillRect(-20, -20, viewW + 40, GROUND_Y + 20);
+		bannerPlane.draw(ctx, viewW, f.clock, f.scroll, px);
 
 		buildings(f, lightAlpha, false);
 		roadStrip(f.scroll, shakeX, shakeY);
@@ -606,6 +609,7 @@ export function createCityRenderer(canvas: HTMLCanvasElement) {
 		}
 		// Lights go on after the dusk tint, so they glow.
 		midCityLights(lightAlpha);
+		bannerPlane.lights(ctx, viewW, f.clock, p.night);
 		buildings(f, lightAlpha, true);
 		if (lightAlpha > 0.3) lamps(f.scroll, (lightAlpha - 0.3) * 0.9);
 

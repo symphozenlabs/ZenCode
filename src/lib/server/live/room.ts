@@ -42,6 +42,10 @@ export interface Client {
 const BROADCAST_MS = 100; // fan-out at most ~10 times per second
 const TICK_MS = 1000;
 const BOARD_ROWS = 10; // phones get the top 10; each already knows its own place
+/** Once every connected phone has answered, let the last answer land on the big screen, then reveal. */
+const ALL_IN_MS = 1000;
+/** After a reveal, how long the answer stays up before the next slide. */
+export const ADVANCE_MS = 5000;
 
 /** Ranks and the board, computed once per fan-out instead of once per phone. */
 interface Standings {
@@ -71,6 +75,8 @@ export class Room {
 	#flushTimer: ReturnType<typeof setTimeout> | null = null;
 	#closeTimer: ReturnType<typeof setTimeout> | null = null;
 	#tickTimer: ReturnType<typeof setInterval> | null = null;
+	#allInTimer: ReturnType<typeof setTimeout> | null = null;
+	#advanceTimer: ReturnType<typeof setTimeout> | null = null;
 	#persistChain: Promise<void> = Promise.resolve();
 
 	constructor(
@@ -257,7 +263,60 @@ export class Room {
 	#clearTimers() {
 		if (this.#closeTimer) clearTimeout(this.#closeTimer);
 		if (this.#tickTimer) clearInterval(this.#tickTimer);
-		this.#closeTimer = this.#tickTimer = null;
+		if (this.#allInTimer) clearTimeout(this.#allInTimer);
+		if (this.#advanceTimer) clearTimeout(this.#advanceTimer);
+		this.#closeTimer = this.#tickTimer = this.#allInTimer = this.#advanceTimer = null;
+	}
+
+	/** True when every phone still connected has answered the slide. */
+	#everyoneAnswered(slideId: string) {
+		const answers = this.responses.get(slideId);
+		if (!answers?.size || !this.players.size) return false;
+		for (const pid of this.players.keys()) if (!answers.has(pid)) return false;
+		return true;
+	}
+
+	/** After an answer or a phone leaving: if nobody is left to answer, reveal. */
+	checkEveryoneAnswered() {
+		const slide = this.current;
+		const run = this.currentRun;
+		if (!slide || !run || run.phase !== 'open' || this.#allInTimer || !this.#everyoneAnswered(slide.id)) return;
+		this.#allInTimer = setTimeout(() => {
+			this.#allInTimer = null;
+			if (this.currentRun === run && run.phase === 'open' && this.#everyoneAnswered(slide.id)) this.reveal();
+		}, ALL_IN_MS);
+	}
+
+	/**
+	 * Once a slide's answer is up, move on to the next slide by itself — unless
+	 * it's the last one, it has no answers (Q&A), or the leaderboard is showing.
+	 */
+	#scheduleAdvance() {
+		const live = this.live;
+		const slide = this.current;
+		const run = this.currentRun;
+		if (!live || !slide || !run || this.#advanceTimer) return;
+		if (live.view !== 'slide' || SLIDE_META[slide.kind].input === 'none' || live.index >= this.session.slides.length - 1) {
+			run.advanceAt = null;
+			return;
+		}
+		run.advanceAt ??= Date.now() + ADVANCE_MS;
+		this.#advanceTimer = setTimeout(
+			() => {
+				this.#advanceTimer = null;
+				if (this.currentRun !== run || this.live?.view !== 'slide' || run.advanceAt == null) return;
+				run.advanceAt = null;
+				this.goTo(this.live.index + 1);
+			},
+			Math.max(0, run.advanceAt - Date.now())
+		);
+	}
+
+	#cancelAdvance() {
+		if (this.#advanceTimer) clearTimeout(this.#advanceTimer);
+		this.#advanceTimer = null;
+		const run = this.currentRun;
+		if (run) run.advanceAt = null;
 	}
 
 	#armTimer() {
@@ -290,6 +349,7 @@ export class Room {
 			this.persist();
 		}
 		this.#armTimer();
+		if (run?.advanceAt != null) this.#scheduleAdvance();
 	}
 
 	dispose() {
@@ -336,6 +396,7 @@ export class Room {
 		if (!Number.isInteger(index) || index < 0 || index >= this.session.slides.length) throw new HubError(400, 'No such slide.');
 		const leaving = this.currentRun;
 		if (leaving?.phase === 'open') leaving.phase = 'closed';
+		if (leaving) leaving.advanceAt = null;
 		this.#clearTimers();
 		live.index = index;
 		live.view = 'slide';
@@ -371,6 +432,7 @@ export class Room {
 		this.#clearTimers();
 		this.flush();
 		run.showResults = true;
+		this.#scheduleAdvance();
 		if (!hasAnswer(slide) || run.revealed) return this.#changed();
 
 		run.revealed = true;
@@ -400,6 +462,8 @@ export class Room {
 
 	setLeaderboard(show: boolean) {
 		const { live } = this.#need();
+		// The host took over: the leaderboard stays up until they move on.
+		this.#cancelAdvance();
 		live.view = show ? 'leaderboard' : 'slide';
 		if (show) this.toHosts({ t: 'leaderboard_update', entries: this.leaderboard() });
 		this.#changed();
@@ -457,6 +521,7 @@ export class Room {
 		bySlide.set(pid, response);
 		this.repo.createResponse(this.session.id, response).catch((err) => console.error('[live] save response', err));
 		this.#markAnswer();
+		this.checkEveryoneAnswered();
 		return { ok: true };
 	}
 }
