@@ -81,7 +81,9 @@
 		saving = true;
 		saveError = '';
 		const l = { ...$state.snapshot(leader) };
-		for (const k of Object.keys(l) as (keyof TeamLeader)[]) l[k] = l[k].trim();
+		for (const k of Object.keys(l) as (keyof TeamLeader)[]) {
+			if (typeof l[k] === 'string') l[k] = (l[k] as string).trim();
+		}
 		l.mobileNumber = l.mobileNumber.replace(/[\s-]/g, '');
 		l.admissionNumber = normalizeAdmission(l.admissionNumber);
 		const members: TeamMember[] = [

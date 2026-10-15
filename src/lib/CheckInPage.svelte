@@ -179,25 +179,19 @@
         <!-- Attendance Check-in Banner -->
         <div class="attendance-banner {isCheckedIn ? 'checked-in-state' : 'pending-state'}">
           <div class="attendance-status-info">
-            <div class="attendance-label">TEAM ATTENDANCE STATUS</div>
+            <div class="attendance-label">EVENT PASS VERIFICATION</div>
             <div class="attendance-value">
               {#if isCheckedIn}
-                <span class="status-checked-badge">✓ Team Checked In ({checkInTime})</span>
+                <span class="status-checked-badge">✓ Desk Verified ({checkInTime})</span>
               {:else}
-                <span class="status-pending-badge">Pending Attendance Desk Check-in</span>
+                <span class="status-pending-badge">Official Team Registration Pass</span>
               {/if}
             </div>
           </div>
 
-          {#if !isCheckedIn}
-            <button type="button" class="checkin-action-btn" onclick={handleCheckInTeam}>
-              ✓ Mark Team as Checked In
-            </button>
-          {:else}
-            <div class="checked-in-stamp">
-              All team members marked present
-            </div>
-          {/if}
+          <div class="checked-in-stamp" style="background: rgba(255, 255, 255, 0.08); color: #cbd5e1; border: 1px solid rgba(255, 255, 255, 0.15);">
+            Present at desk for individual attendance
+          </div>
         </div>
 
         <div class="meta-row">
@@ -521,27 +515,6 @@
     font-size: 1.05rem;
   }
 
-  .checkin-action-btn {
-    background: #10b981;
-    color: #ffffff;
-    font-weight: 700;
-    font-size: 0.95rem;
-    padding: 10px 20px;
-    border-radius: 8px;
-    border: none;
-    cursor: pointer;
-    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
-    transition: background 0.15s ease, transform 0.1s ease;
-
-    &:hover {
-      background: #059669;
-      transform: translateY(-1px);
-    }
-
-    &:active {
-      transform: translateY(0);
-    }
-  }
 
   .checked-in-stamp {
     font-size: 0.85rem;

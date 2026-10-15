@@ -28,6 +28,8 @@ function fromDoc(id: string, event: EventId, d: DocumentData): Registration {
 				memberNumber: typeof m?.memberNumber === 'number' ? m.memberNumber : i + 1,
 				name: str(m?.name),
 				admissionNumber: str(m?.admissionNumber),
+				yearOfStudy: str(m?.yearOfStudy || m?.classSection),
+				classSection: str(m?.classSection || m?.yearOfStudy),
 				email: str(m?.email)
 			}))
 		: [];
@@ -42,6 +44,7 @@ function fromDoc(id: string, event: EventId, d: DocumentData): Registration {
 			admissionNumber: str(d.teamLeader?.admissionNumber),
 			// main's form stores the year of study in both fields; older entries may only have one.
 			classSection: str(d.teamLeader?.classSection || d.teamLeader?.yearOfStudy),
+			yearOfStudy: str(d.teamLeader?.yearOfStudy || d.teamLeader?.classSection),
 			email: str(d.teamLeader?.email),
 			mobileNumber: str(d.teamLeader?.mobileNumber)
 		},

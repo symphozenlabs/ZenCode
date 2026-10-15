@@ -15,7 +15,8 @@
 		ExternalLink,
 		Radio,
 		MailCheck,
-		Award
+		Award,
+		UserCheck
 	} from '@lucide/svelte';
 	import { adminAuth } from '$lib/stores/admin-auth.svelte';
 	import { registrations } from '$lib/stores/registrations.svelte';
@@ -35,6 +36,7 @@
 			items: [
 				{ href: '/admin/hackathon', label: 'Hackathon', icon: Code2 },
 				{ href: '/admin/pitch-fest', label: 'Pitch Fest', icon: Presentation },
+				{ href: '/admin/attendance', label: 'Attendance', icon: UserCheck },
 				{ href: '/admin/games', label: 'Games', icon: Gamepad2 },
 				{ href: '/admin/track', label: 'Track', icon: MailCheck }
 			]

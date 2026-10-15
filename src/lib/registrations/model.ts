@@ -32,10 +32,13 @@ export const TEAM_SIZES: Record<EventId, number[]> = {
 export const REGISTRATION_STATUSES = ['approved', 'rejected'] as const;
 export type RegistrationStatus = (typeof REGISTRATION_STATUSES)[number];
 
+export type { EventId } from '$lib/config/site';
+
 export interface TeamLeader {
 	name: string;
 	admissionNumber: string;
 	classSection: string;
+	yearOfStudy?: string;
 	email: string;
 	/** 10-digit mobile number; empty on registrations made before it was collected */
 	mobileNumber: string;
@@ -45,7 +48,19 @@ export interface TeamMember {
 	memberNumber: number;
 	name: string;
 	admissionNumber: string;
+	yearOfStudy?: string;
+	classSection?: string;
 	email: string;
+}
+
+export interface NormalizedParticipant {
+	memberNumber: number;
+	name: string;
+	admissionNumber: string;
+	yearOfStudy: string;
+	classSection: string;
+	email: string;
+	isLeader: boolean;
 }
 
 /** Server-recorded outcome of the last check-in pass email to one address. */
@@ -106,3 +121,60 @@ export function searchFields(members: Pick<TeamMember, 'admissionNumber' | 'emai
 		_searchEmails: members.map((m) => m.email.trim().toLowerCase())
 	};
 }
+
+/** Returns all participants for a team, guaranteeing leader and all members are present and indexed. */
+export function getAllTeamParticipants(r: Pick<Registration, 'teamLeader' | 'members'>): NormalizedParticipant[] {
+	const leaderAdm = (r.teamLeader?.admissionNumber || '').trim().toUpperCase();
+	const leaderEmail = (r.teamLeader?.email || '').trim().toLowerCase();
+	const results: NormalizedParticipant[] = [];
+
+	if (Array.isArray(r.members) && r.members.length > 0) {
+		const hasLeaderDetails = Boolean(leaderAdm || leaderEmail);
+		let foundLeader = false;
+		r.members.forEach((m, idx) => {
+			const mAdm = (m.admissionNumber || '').trim().toUpperCase();
+			const mEmail = (m.email || '').trim().toLowerCase();
+			const isLead = hasLeaderDetails
+				? (Boolean(leaderAdm) && mAdm === leaderAdm) || (Boolean(leaderEmail) && mEmail === leaderEmail)
+				: m.memberNumber === 1 || idx === 0;
+			if (isLead) foundLeader = true;
+			results.push({
+				memberNumber: m.memberNumber || idx + 1,
+				name: m.name || '',
+				admissionNumber: m.admissionNumber || '',
+				yearOfStudy: m.yearOfStudy || m.classSection || r.teamLeader?.yearOfStudy || r.teamLeader?.classSection || '',
+				classSection: m.classSection || m.yearOfStudy || '',
+				email: m.email || '',
+				isLeader: isLead
+			});
+		});
+
+		if (!foundLeader && (r.teamLeader?.name || r.teamLeader?.admissionNumber)) {
+			results.unshift({
+				memberNumber: 1,
+				name: r.teamLeader.name || '',
+				admissionNumber: r.teamLeader.admissionNumber || '',
+				yearOfStudy: r.teamLeader.yearOfStudy || r.teamLeader.classSection || '',
+				classSection: r.teamLeader.classSection || r.teamLeader.yearOfStudy || '',
+				email: r.teamLeader.email || '',
+				isLeader: true
+			});
+			results.forEach((p, i) => {
+				p.memberNumber = i + 1;
+			});
+		}
+	} else if (r.teamLeader?.name || r.teamLeader?.admissionNumber) {
+		results.push({
+			memberNumber: 1,
+			name: r.teamLeader.name || '',
+			admissionNumber: r.teamLeader.admissionNumber || '',
+			yearOfStudy: r.teamLeader.yearOfStudy || r.teamLeader.classSection || '',
+			classSection: r.teamLeader.classSection || r.teamLeader.yearOfStudy || '',
+			email: r.teamLeader.email || '',
+			isLeader: true
+		});
+	}
+
+	return results;
+}
+
