@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { CheckCircle2, Clock, UserCheck, AlertCircle, Users, Copy, Check, ShieldCheck, X } from '@lucide/svelte';
-	import type { TeamAttendanceRow, StudentAttendanceRow, AttendanceSession } from '$lib/attendance/model';
+	import { CheckCircle2, Clock, UserCheck, Users, Copy, Check, X } from '@lucide/svelte';
+	import type { TeamAttendanceRow, StudentAttendanceRow } from '$lib/attendance/model';
 	import { formatTimestamp } from '$lib/attendance/model';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
@@ -8,17 +8,13 @@
 
 	let {
 		teamRow,
-		session,
 		onMarkStudentPresent,
 		onMarkAllPresent,
-		onCorrectStudent,
 		onClose
 	}: {
 		teamRow: TeamAttendanceRow;
-		session: AttendanceSession | null;
 		onMarkStudentPresent: (member: StudentAttendanceRow) => Promise<void>;
 		onMarkAllPresent: (members: StudentAttendanceRow[]) => Promise<void>;
-		onCorrectStudent: (member: StudentAttendanceRow) => void;
 		onClose: () => void;
 	} = $props();
 
@@ -29,7 +25,6 @@
 	let feedbackMessage = $state<{ text: string; tone: 'ok' | 'error' } | null>(null);
 
 	const uncheckedMembers = $derived(teamRow.members.filter((m) => m.status !== 'present'));
-	const isFinalized = $derived(session?.status === 'finalized');
 
 	async function copyTeamId() {
 		try {
@@ -103,16 +98,11 @@
 						{/if}
 					</button>
 				</div>
-				{#if isFinalized}
-					<span class="rounded-md bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
-						Session Finalized
-					</span>
-				{/if}
 			</div>
 
 			<h2 class="mt-1.5 text-2xl font-extrabold tracking-tight text-foreground">{teamRow.teamName}</h2>
 			<p class="text-xs text-muted-foreground mt-0.5">
-				Leader: <span class="font-medium text-foreground">{teamRow.teamLeaderName}</span> • Session: {teamRow.sessionName}
+				Leader: <span class="font-medium text-foreground">{teamRow.teamLeaderName}</span>
 			</p>
 		</div>
 
@@ -132,8 +122,8 @@
 		</div>
 	</div>
 
-	<!-- Team Summary Bar -->
-	<div class="my-4 grid grid-cols-2 gap-3 sm:grid-cols-4 rounded-lg bg-background p-3 border border-border">
+	<!-- Team Attendance Summary Bar -->
+	<div class="my-4 grid grid-cols-2 gap-3 sm:grid-cols-4 rounded-lg bg-background p-3.5 border border-border">
 		<div>
 			<span class="block text-[11px] font-semibold text-muted-foreground uppercase">Registered</span>
 			<span class="text-lg font-bold text-foreground">{teamRow.registeredMemberCount} Members</span>
@@ -143,21 +133,21 @@
 			<span class="text-lg font-bold text-emerald-600">{teamRow.presentCount}</span>
 		</div>
 		<div>
-			<span class="block text-[11px] font-semibold text-muted-foreground uppercase">
-				{isFinalized ? 'Absent' : 'Not Checked In'}
-			</span>
+			<span class="block text-[11px] font-semibold text-muted-foreground uppercase">Not Checked In</span>
 			<span class="text-lg font-bold {teamRow.notCheckedInCount > 0 ? 'text-amber-600' : 'text-muted-foreground'}">
-				{isFinalized ? teamRow.absentCount : teamRow.notCheckedInCount}
+				{teamRow.notCheckedInCount}
 			</span>
 		</div>
 		<div>
-			<span class="block text-[11px] font-semibold text-muted-foreground uppercase">Status</span>
-			<span class="inline-flex items-center gap-1.5 text-sm font-bold
-				{teamRow.status === 'Fully Present' ? 'text-emerald-700' : teamRow.status === 'Partially Present' ? 'text-amber-700' : 'text-muted-foreground'}">
-				<span class="size-2 rounded-full
-					{teamRow.status === 'Fully Present' ? 'bg-emerald-500' : teamRow.status === 'Partially Present' ? 'bg-amber-500' : 'bg-gray-400'}"></span>
-				{teamRow.status} ({teamRow.attendancePercentage}%)
-			</span>
+			<span class="block text-[11px] font-semibold text-muted-foreground uppercase">Team Attendance</span>
+			<div class="mt-0.5">
+				<span class="inline-flex items-center gap-1.5 text-sm font-bold
+					{teamRow.status === 'Fully Present' ? 'text-emerald-700' : teamRow.status === 'Partially Present' ? 'text-amber-700' : 'text-muted-foreground'}">
+					<span class="size-2 rounded-full
+						{teamRow.status === 'Fully Present' ? 'bg-emerald-500' : teamRow.status === 'Partially Present' ? 'bg-amber-500' : 'bg-gray-400'}"></span>
+					{teamRow.presentCount} of {teamRow.registeredMemberCount} present
+				</span>
+			</div>
 		</div>
 	</div>
 
@@ -204,15 +194,11 @@
 							</div>
 
 							{#if isPresent}
-								<span class="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-800">
+								<span class="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-[11px] font-bold text-emerald-800">
 									<CheckCircle2 class="size-3 text-emerald-600" /> Present
 								</span>
-							{:else if isFinalized}
-								<span class="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-bold text-destructive">
-									<AlertCircle class="size-3" /> Absent
-								</span>
 							{:else}
-								<span class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800">
+								<span class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-bold text-amber-800">
 									<Clock class="size-3" /> Not Checked In
 								</span>
 							{/if}
@@ -255,15 +241,9 @@
 								{/if}
 							</Button>
 						{:else}
-							<div class="flex items-center justify-between w-full">
+							<div class="flex items-center justify-between w-full py-1">
 								<span class="text-xs font-semibold text-emerald-700">✓ Already Checked In</span>
-								<button
-									type="button"
-									onclick={() => onCorrectStudent(member)}
-									class="text-[11px] text-muted-foreground hover:text-foreground underline"
-								>
-									Correct status
-								</button>
+								<span class="text-[11px] text-muted-foreground font-mono">Recorded</span>
 							</div>
 						{/if}
 					</div>

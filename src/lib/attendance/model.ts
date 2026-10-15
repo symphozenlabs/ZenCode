@@ -2,33 +2,14 @@ import type { EventId } from '$lib/config/site';
 import { getAllTeamParticipants, type NormalizedParticipant, type Registration } from '$lib/registrations/model';
 
 export const ATTENDANCE_COLLECTIONS = {
-	SESSIONS: 'attendance_sessions',
-	RECORDS: 'attendance_records',
-	AUDIT_LOGS: 'attendance_audit_logs'
+	RECORDS: 'attendance_records'
 } as const;
 
-export type AttendanceSessionStatus = 'open' | 'finalized';
-
-export interface AttendanceSession {
-	id: string;
-	eventId: EventId;
-	eventName: 'Hackathon' | 'Pitch Fest';
-	name: string;
-	date: string; // YYYY-MM-DD
-	status: AttendanceSessionStatus;
-	notes?: string;
-	createdBy: string;
-	createdAt: number;
-	updatedAt: number;
-	finalizedAt?: number | null;
-	finalizedBy?: string | null;
-}
-
 export type ParticipantAttendanceStatus = 'present' | 'not-checked-in' | 'absent';
+export type TeamAttendanceStatus = 'Fully Present' | 'Partially Present' | 'No Check-ins';
 
 export interface AttendanceRecord {
-	id: string; // deterministic: `${sessionId}__${teamId}__${participantKey}`
-	sessionId: string;
+	id: string; // deterministic: `${teamId}__${participantKey}`
 	eventId: EventId;
 	teamId: string;
 	teamName: string;
@@ -44,30 +25,10 @@ export interface AttendanceRecord {
 	checkedInBy: string;
 	createdAt: number;
 	updatedAt: number;
+	sessionId?: string;
 }
-
-export interface AttendanceAuditLog {
-	id: string;
-	recordId: string;
-	sessionId: string;
-	eventId: EventId;
-	teamId: string;
-	teamName?: string;
-	participantKey: string;
-	studentName: string;
-	admissionNumber: string;
-	previousStatus: string;
-	newStatus: string;
-	reason: string;
-	changedBy: string;
-	timestamp: number;
-}
-
-export type TeamAttendanceStatus = 'Fully Present' | 'Partially Present' | 'No Check-ins' | 'Attendance Pending';
 
 export interface StudentAttendanceRow {
-	sessionId: string;
-	sessionName: string;
 	eventId: EventId;
 	eventName: 'Hackathon' | 'Pitch Fest';
 	teamId: string;
@@ -79,15 +40,15 @@ export interface StudentAttendanceRow {
 	yearOfStudy: string;
 	email: string;
 	isLeader: boolean;
-	status: ParticipantAttendanceStatus;
+	status: 'present' | 'not-checked-in';
 	checkedInAt: number | null;
 	checkedInBy: string | null;
-	isFinalized: boolean;
+	sessionId?: string;
+	sessionName?: string;
+	isFinalized?: boolean;
 }
 
 export interface TeamAttendanceRow {
-	sessionId: string;
-	sessionName: string;
 	eventId: EventId;
 	eventName: 'Hackathon' | 'Pitch Fest';
 	teamId: string;
@@ -96,27 +57,29 @@ export interface TeamAttendanceRow {
 	registeredMemberCount: number;
 	presentCount: number;
 	notCheckedInCount: number;
-	absentCount: number;
+	absentCount?: number;
 	attendancePercentage: number;
 	status: TeamAttendanceStatus;
 	members: StudentAttendanceRow[];
+	sessionId?: string;
+	sessionName?: string;
 }
 
 export interface AttendanceOverviewStats {
 	totalRegisteredStudents: number;
 	totalPresentStudents: number;
-	totalAbsentStudents: number;
+	totalAbsentStudents?: number;
 	totalNotCheckedInStudents: number;
 	overallAttendancePercentage: number;
 	totalTeams: number;
 	teamsFullyPresent: number;
 	teamsPartiallyPresent: number;
 	teamsNoCheckIns: number;
-	isSessionFinalized: boolean;
+	isSessionFinalized?: boolean;
 }
 
 /**
- * Creates a deterministic, URL-safe participant key from their admission number or email or memberNumber.
+ * Creates a deterministic, URL-safe participant key from admission number or email or memberNumber.
  */
 export function getParticipantKey(member: Pick<NormalizedParticipant, 'admissionNumber' | 'email' | 'memberNumber'>): string {
 	const adm = (member.admissionNumber || '').trim().toUpperCase();
@@ -131,13 +94,20 @@ export function getParticipantKey(member: Pick<NormalizedParticipant, 'admission
 }
 
 /**
- * Deterministic document ID preventing race-condition duplicates.
+ * Deterministic document ID preventing duplicates.
+ * Supports both getRecordId(teamId, participantKey) and legacy getRecordId(sessionId, teamId, participantKey).
  */
-export function getRecordId(sessionId: string, teamId: string, participantKey: string): string {
-	const s = sessionId.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
-	const t = teamId.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
-	const p = participantKey.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
-	return `${s}__${t}__${p}`;
+export function getRecordId(teamId: string, participantKey: string): string;
+export function getRecordId(sessionOrTeam: string, teamOrKey: string, maybeKey?: string): string;
+export function getRecordId(a: string, b: string, c?: string): string {
+	if (c) {
+		const teamId = b.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+		const key = c.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+		return `${teamId}__${key}`;
+	}
+	const t = a.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+	const p = b.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+	return `${t}__${p}`;
 }
 
 /**
@@ -179,28 +149,6 @@ export function extractTeamIdFromQr(rawPayload: string): string {
 }
 
 /**
- * RFC 4180 CSV cell escaper.
- */
-function escapeCsvCell(val: unknown): string {
-	if (val === null || val === undefined) return '""';
-	const str = String(val);
-	// If contains comma, quote, or newline, escape quotes and wrap in quotes
-	if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
-		return `"${str.replace(/"/g, '""')}"`;
-	}
-	return `"${str}"`;
-}
-
-/**
- * Formats CSV string with header and rows.
- */
-export function generateCsv(headers: string[], rows: (string | number | boolean | null | undefined)[][]): string {
-	const headerLine = headers.map(escapeCsvCell).join(',');
-	const dataLines = rows.map((r) => r.map(escapeCsvCell).join(','));
-	return [headerLine, ...dataLines].join('\r\n');
-}
-
-/**
  * Formats epoch millis into readable timestamp.
  */
 export function formatTimestamp(millis: number | null | undefined): string {
@@ -216,20 +164,23 @@ export function formatTimestamp(millis: number | null | undefined): string {
 }
 
 /**
- * Builds composite attendance data joining registrations with session records.
- * Pure logic shared across client store and server exports.
+ * Builds composite attendance data joining registrations with attendance records.
+ * Pure logic shared across client store and tests.
+ * Does NOT require sessions. Supports optional eventFilter ('all' | 'hackathon' | 'pitch-fest').
  */
 export function buildAttendanceMatrix(
 	registrations: Registration[],
-	session: AttendanceSession,
-	records: AttendanceRecord[]
+	records: AttendanceRecord[],
+	eventFilter: 'all' | 'hackathon' | 'pitch-fest' = 'all'
 ): {
 	studentRows: StudentAttendanceRow[];
 	teamRows: TeamAttendanceRow[];
 	overview: AttendanceOverviewStats;
 } {
+	// Map records by `${teamId}__${participantKey}` and by `participantKey`
 	const recordMap = new Map<string, AttendanceRecord>();
 	for (const r of records) {
+		recordMap.set(`${r.teamId}__${r.participantKey}`, r);
 		recordMap.set(r.participantKey, r);
 	}
 
@@ -238,16 +189,17 @@ export function buildAttendanceMatrix(
 
 	let totalRegisteredStudents = 0;
 	let totalPresentStudents = 0;
-	let totalAbsentStudents = 0;
 	let totalNotCheckedInStudents = 0;
 	let teamsFullyPresent = 0;
 	let teamsPartiallyPresent = 0;
 	let teamsNoCheckIns = 0;
 
-	// Filter registrations by event
-	const eventRegistrations = registrations.filter((r) => r.event === session.eventId && r.status !== 'rejected');
+	// Filter registrations by event and status
+	const filteredRegistrations = registrations.filter(
+		(r) => (eventFilter === 'all' || r.event === eventFilter) && r.status !== 'rejected'
+	);
 
-	for (const reg of eventRegistrations) {
+	for (const reg of filteredRegistrations) {
 		const participants = getAllTeamParticipants({
 			teamLeader: reg.teamLeader,
 			members: reg.members
@@ -259,9 +211,9 @@ export function buildAttendanceMatrix(
 
 		for (const p of participants) {
 			const pKey = getParticipantKey(p);
-			const rec = recordMap.get(pKey);
+			const rec = recordMap.get(`${reg.id}__${pKey}`) || recordMap.get(pKey);
 
-			let status: ParticipantAttendanceStatus;
+			let status: 'present' | 'not-checked-in' = 'not-checked-in';
 			let checkedInAt: number | null = null;
 			let checkedInBy: string | null = null;
 
@@ -272,22 +224,15 @@ export function buildAttendanceMatrix(
 				teamPresentCount += 1;
 				totalPresentStudents += 1;
 			} else {
-				if (session.status === 'finalized') {
-					status = 'absent';
-					totalAbsentStudents += 1;
-				} else {
-					status = 'not-checked-in';
-					totalNotCheckedInStudents += 1;
-				}
+				status = 'not-checked-in';
+				totalNotCheckedInStudents += 1;
 			}
 
 			totalRegisteredStudents += 1;
 
 			const row: StudentAttendanceRow = {
-				sessionId: session.id,
-				sessionName: session.name,
-				eventId: session.eventId,
-				eventName: session.eventName,
+				eventId: reg.event,
+				eventName: reg.event === 'pitch-fest' ? 'Pitch Fest' : 'Hackathon',
 				teamId: reg.id,
 				teamName,
 				participantKey: pKey,
@@ -299,8 +244,7 @@ export function buildAttendanceMatrix(
 				isLeader: p.isLeader,
 				status,
 				checkedInAt,
-				checkedInBy,
-				isFinalized: session.status === 'finalized'
+				checkedInBy
 			};
 
 			studentRows.push(row);
@@ -308,34 +252,30 @@ export function buildAttendanceMatrix(
 		}
 
 		const totalCount = participants.length;
-		const notCheckedInCount = session.status === 'finalized' ? 0 : totalCount - teamPresentCount;
-		const absentCount = session.status === 'finalized' ? totalCount - teamPresentCount : 0;
+		const notCheckedInCount = totalCount - teamPresentCount;
 		const attendancePercentage = totalCount > 0 ? Math.round((teamPresentCount / totalCount) * 100) : 0;
 
-		let teamStatus: 'Fully Present' | 'Partially Present' | 'No Check-ins' | 'Attendance Pending';
-		if (teamPresentCount === totalCount) {
+		let teamStatus: TeamAttendanceStatus;
+		if (teamPresentCount === totalCount && totalCount > 0) {
 			teamStatus = 'Fully Present';
 			teamsFullyPresent += 1;
 		} else if (teamPresentCount > 0) {
 			teamStatus = 'Partially Present';
 			teamsPartiallyPresent += 1;
 		} else {
-			teamStatus = session.status === 'finalized' ? 'No Check-ins' : 'Attendance Pending';
+			teamStatus = 'No Check-ins';
 			teamsNoCheckIns += 1;
 		}
 
 		teamRows.push({
-			sessionId: session.id,
-			sessionName: session.name,
-			eventId: session.eventId,
-			eventName: session.eventName,
+			eventId: reg.event,
+			eventName: reg.event === 'pitch-fest' ? 'Pitch Fest' : 'Hackathon',
 			teamId: reg.id,
 			teamName,
 			teamLeaderName: reg.teamLeader.name,
 			registeredMemberCount: totalCount,
 			presentCount: teamPresentCount,
 			notCheckedInCount,
-			absentCount,
 			attendancePercentage,
 			status: teamStatus,
 			members: teamMemberRows
@@ -348,16 +288,13 @@ export function buildAttendanceMatrix(
 	const overview: AttendanceOverviewStats = {
 		totalRegisteredStudents,
 		totalPresentStudents,
-		totalAbsentStudents,
 		totalNotCheckedInStudents,
 		overallAttendancePercentage,
-		totalTeams: eventRegistrations.length,
+		totalTeams: filteredRegistrations.length,
 		teamsFullyPresent,
 		teamsPartiallyPresent,
-		teamsNoCheckIns,
-		isSessionFinalized: session.status === 'finalized'
+		teamsNoCheckIns
 	};
 
 	return { studentRows, teamRows, overview };
 }
-

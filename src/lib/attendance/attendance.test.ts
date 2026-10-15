@@ -3,12 +3,9 @@ import {
 	extractTeamIdFromQr,
 	getParticipantKey,
 	getRecordId,
-	generateCsv,
 	formatTimestamp,
 	buildAttendanceMatrix,
-	type AttendanceSession,
-	type AttendanceRecord,
-	type AttendanceAuditLog
+	type AttendanceRecord
 } from './model';
 import { getAllTeamParticipants, type Registration } from '$lib/registrations/model';
 
@@ -48,20 +45,22 @@ describe('Deterministic Record IDs & Participant Keys', () => {
 		expect(getParticipantKey(member1)).toBe(getParticipantKey(member2));
 	});
 
-	it('generates consistent, deterministic record IDs preventing race duplicates', () => {
-		const id1 = getRecordId('session-day1', 'team-hack-01', '25CAPMCA001');
-		const id2 = getRecordId('session-day1', 'team-hack-01', '25CAPMCA001');
-		expect(id1).toBe('session-day1__team-hack-01__25CAPMCA001');
+	it('generates consistent, deterministic record IDs preventing race duplicates without sessions', () => {
+		const id1 = getRecordId('team-hack-01', '25CAPMCA001');
+		const id2 = getRecordId('team-hack-01', '25CAPMCA001');
+		expect(id1).toBe('team-hack-01__25CAPMCA001');
 		expect(id1).toBe(id2);
 	});
 
-	it('cannot confuse teams or sessions with similar names', () => {
-		const idTeam1 = getRecordId('session-1', 'team-1', '25CAPMCA001');
-		const idTeam10 = getRecordId('session-1', 'team-10', '25CAPMCA001');
-		const idSession2 = getRecordId('session-2', 'team-1', '25CAPMCA001');
+	it('supports 3-arg legacy signature for backward compatibility', () => {
+		const legacyId = getRecordId('legacy-session', 'team-hack-01', '25CAPMCA001');
+		expect(legacyId).toBe('team-hack-01__25CAPMCA001');
+	});
 
+	it('cannot confuse teams with similar names', () => {
+		const idTeam1 = getRecordId('team-1', '25CAPMCA001');
+		const idTeam10 = getRecordId('team-10', '25CAPMCA001');
 		expect(idTeam1).not.toBe(idTeam10);
-		expect(idTeam1).not.toBe(idSession2);
 	});
 });
 
@@ -141,28 +140,7 @@ describe('Participant Roster Normalization', () => {
 	});
 });
 
-describe('Attendance Matrix & Verification Rules', () => {
-	const mockSessionOpen: AttendanceSession = {
-		id: 'sess-hack-day1',
-		eventId: 'hackathon',
-		eventName: 'Hackathon',
-		name: 'Hackathon Day 1 Morning',
-		date: '2026-10-15',
-		status: 'open',
-		createdBy: 'admin@example.com',
-		createdAt: 1000,
-		updatedAt: 1000
-	};
-
-	const mockSessionFinalized: AttendanceSession = {
-		...mockSessionOpen,
-		id: 'sess-hack-final',
-		name: 'Hackathon Final Presentation',
-		status: 'finalized',
-		finalizedAt: 2000,
-		finalizedBy: 'admin@example.com'
-	};
-
+describe('Simplified Attendance Matrix (Session-Free)', () => {
 	const mockHackathonTeams: Registration[] = [
 		{
 			id: 'team-alpha',
@@ -212,12 +190,34 @@ describe('Attendance Matrix & Verification Rules', () => {
 		}
 	];
 
+	const mockPitchTeam: Registration = {
+		id: 'team-pitch-01',
+		event: 'pitch-fest',
+		teamName: 'Pitch Pioneers',
+		teamSize: 2,
+		teamLeader: {
+			name: 'Grace Lead',
+			admissionNumber: '25CAPMCA301',
+			yearOfStudy: '1st Year MCA',
+			classSection: '1st Year MCA',
+			email: 'grace@pitch.com',
+			mobileNumber: '9876543212'
+		},
+		members: [
+			{ memberNumber: 1, name: 'Grace Lead', admissionNumber: '25CAPMCA301', email: 'grace@pitch.com' },
+			{ memberNumber: 2, name: 'Harry Partner', admissionNumber: '25CAPMCA302', email: 'harry@pitch.com' }
+		],
+		status: 'approved',
+		createdAt: 700,
+		reviewedBy: null,
+		emailDelivery: []
+	};
+
 	it('marking one student present does NOT mark the other members present', () => {
 		// Only Alice is checked in
 		const records: AttendanceRecord[] = [
 			{
-				id: 'sess-hack-day1__team-alpha__25CAPMCA101',
-				sessionId: 'sess-hack-day1',
+				id: 'team-alpha__25CAPMCA101',
 				eventId: 'hackathon',
 				teamId: 'team-alpha',
 				teamName: 'Alpha Innovators',
@@ -236,7 +236,7 @@ describe('Attendance Matrix & Verification Rules', () => {
 			}
 		];
 
-		const matrix = buildAttendanceMatrix(mockHackathonTeams, mockSessionOpen, records);
+		const matrix = buildAttendanceMatrix(mockHackathonTeams, records, 'hackathon');
 		const alphaTeam = matrix.teamRows.find((t) => t.teamId === 'team-alpha')!;
 
 		expect(alphaTeam.presentCount).toBe(1);
@@ -247,18 +247,18 @@ describe('Attendance Matrix & Verification Rules', () => {
 		// Check individual members
 		expect(alphaTeam.members[0].studentName).toBe('Alice Lead');
 		expect(alphaTeam.members[0].status).toBe('present');
+		expect(alphaTeam.members[0].checkedInAt).toBe(1500);
 		expect(alphaTeam.members[1].studentName).toBe('Bob Two');
 		expect(alphaTeam.members[1].status).toBe('not-checked-in');
+		expect(alphaTeam.members[1].checkedInAt).toBeNull();
 		expect(alphaTeam.members[2].studentName).toBe('Charlie Three');
 		expect(alphaTeam.members[2].status).toBe('not-checked-in');
 	});
 
-	it('a three-member team with two check-ins displays 2/3 present and one not checked in', () => {
-		// Alice and Bob checked in, Charlie not checked in
+	it('a three-member team with two check-ins displays 2 of 3 members present and one not checked in', () => {
 		const records: AttendanceRecord[] = [
 			{
-				id: 'sess-hack-day1__team-alpha__25CAPMCA101',
-				sessionId: 'sess-hack-day1',
+				id: 'team-alpha__25CAPMCA101',
 				eventId: 'hackathon',
 				teamId: 'team-alpha',
 				teamName: 'Alpha Innovators',
@@ -276,8 +276,7 @@ describe('Attendance Matrix & Verification Rules', () => {
 				updatedAt: 1500
 			},
 			{
-				id: 'sess-hack-day1__team-alpha__25CAPMCA102',
-				sessionId: 'sess-hack-day1',
+				id: 'team-alpha__25CAPMCA102',
 				eventId: 'hackathon',
 				teamId: 'team-alpha',
 				teamName: 'Alpha Innovators',
@@ -296,7 +295,7 @@ describe('Attendance Matrix & Verification Rules', () => {
 			}
 		];
 
-		const matrix = buildAttendanceMatrix(mockHackathonTeams, mockSessionOpen, records);
+		const matrix = buildAttendanceMatrix(mockHackathonTeams, records, 'hackathon');
 		const alphaTeam = matrix.teamRows.find((t) => t.teamId === 'team-alpha')!;
 
 		expect(alphaTeam.registeredMemberCount).toBe(3);
@@ -309,8 +308,7 @@ describe('Attendance Matrix & Verification Rules', () => {
 	it('a team becomes fully present only when all its registered members have checked in', () => {
 		const records: AttendanceRecord[] = [
 			{
-				id: 'sess-hack-day1__team-alpha__25CAPMCA101',
-				sessionId: 'sess-hack-day1',
+				id: 'team-alpha__25CAPMCA101',
 				eventId: 'hackathon',
 				teamId: 'team-alpha',
 				teamName: 'Alpha Innovators',
@@ -328,8 +326,7 @@ describe('Attendance Matrix & Verification Rules', () => {
 				updatedAt: 1500
 			},
 			{
-				id: 'sess-hack-day1__team-alpha__25CAPMCA102',
-				sessionId: 'sess-hack-day1',
+				id: 'team-alpha__25CAPMCA102',
 				eventId: 'hackathon',
 				teamId: 'team-alpha',
 				teamName: 'Alpha Innovators',
@@ -347,8 +344,7 @@ describe('Attendance Matrix & Verification Rules', () => {
 				updatedAt: 1510
 			},
 			{
-				id: 'sess-hack-day1__team-alpha__25CAPMCA103',
-				sessionId: 'sess-hack-day1',
+				id: 'team-alpha__25CAPMCA103',
 				eventId: 'hackathon',
 				teamId: 'team-alpha',
 				teamName: 'Alpha Innovators',
@@ -367,7 +363,7 @@ describe('Attendance Matrix & Verification Rules', () => {
 			}
 		];
 
-		const matrix = buildAttendanceMatrix(mockHackathonTeams, mockSessionOpen, records);
+		const matrix = buildAttendanceMatrix(mockHackathonTeams, records, 'hackathon');
 		const alphaTeam = matrix.teamRows.find((t) => t.teamId === 'team-alpha')!;
 
 		expect(alphaTeam.presentCount).toBe(3);
@@ -376,61 +372,25 @@ describe('Attendance Matrix & Verification Rules', () => {
 		expect(alphaTeam.status).toBe('Fully Present');
 	});
 
-	it('in finalized sessions, unchecked students are marked absent', () => {
-		// No check-ins for team Beta
-		const matrix = buildAttendanceMatrix(mockHackathonTeams, mockSessionFinalized, []);
+	it('unchecked students are labeled not-checked-in, not absent', () => {
+		const matrix = buildAttendanceMatrix(mockHackathonTeams, [], 'hackathon');
 		const betaTeam = matrix.teamRows.find((t) => t.teamId === 'team-beta')!;
 
 		expect(betaTeam.presentCount).toBe(0);
-		expect(betaTeam.absentCount).toBe(3);
-		expect(betaTeam.notCheckedInCount).toBe(0);
+		expect(betaTeam.notCheckedInCount).toBe(3);
 		expect(betaTeam.status).toBe('No Check-ins');
-		expect(betaTeam.members[0].status).toBe('absent');
+		expect(betaTeam.members[0].status).toBe('not-checked-in');
 
-		expect(matrix.overview.isSessionFinalized).toBe(true);
-		expect(matrix.overview.totalAbsentStudents).toBe(6);
-		expect(matrix.overview.totalNotCheckedInStudents).toBe(0);
+		expect(matrix.overview.totalPresentStudents).toBe(0);
+		expect(matrix.overview.totalNotCheckedInStudents).toBe(6);
+		expect(matrix.overview.overallAttendancePercentage).toBe(0);
 	});
 
-	it('different events and sessions maintain separate attendance records', () => {
-		const pitchTeam: Registration = {
-			id: 'team-pitch-01',
-			event: 'pitch-fest',
-			teamName: 'Pitch Pioneers',
-			teamSize: 2,
-			teamLeader: {
-				name: 'Grace Lead',
-				admissionNumber: '25CAPMCA301',
-				yearOfStudy: '1st Year MCA',
-				classSection: '1st Year MCA',
-				email: 'grace@pitch.com',
-				mobileNumber: '9876543212'
-			},
-			members: [
-				{ memberNumber: 1, name: 'Grace Lead', admissionNumber: '25CAPMCA301', email: 'grace@pitch.com' },
-				{ memberNumber: 2, name: 'Harry Partner', admissionNumber: '25CAPMCA302', email: 'harry@pitch.com' }
-			],
-			status: 'approved',
-			createdAt: 700,
-			reviewedBy: null,
-			emailDelivery: []
-		};
-
-		const pitchSession: AttendanceSession = {
-			id: 'sess-pitch-01',
-			eventId: 'pitch-fest',
-			eventName: 'Pitch Fest',
-			name: 'Pitch Fest Finals',
-			date: '2026-10-16',
-			status: 'open',
-			createdBy: 'admin@example.com',
-			createdAt: 2000,
-			updatedAt: 2000
-		};
+	it('different events maintain separate attendance records and filter cleanly', () => {
+		const allRegistrations = [...mockHackathonTeams, mockPitchTeam];
 
 		const pitchRecord: AttendanceRecord = {
-			id: 'sess-pitch-01__team-pitch-01__25CAPMCA301',
-			sessionId: 'sess-pitch-01',
+			id: 'team-pitch-01__25CAPMCA301',
 			eventId: 'pitch-fest',
 			teamId: 'team-pitch-01',
 			teamName: 'Pitch Pioneers',
@@ -448,27 +408,20 @@ describe('Attendance Matrix & Verification Rules', () => {
 			updatedAt: 2500
 		};
 
-		// Pitch session matrix only contains pitch teams
-		const matrix = buildAttendanceMatrix([...mockHackathonTeams, pitchTeam], pitchSession, [pitchRecord]);
-		expect(matrix.teamRows).toHaveLength(1);
-		expect(matrix.teamRows[0].teamId).toBe('team-pitch-01');
-		expect(matrix.overview.totalRegisteredStudents).toBe(2);
-		expect(matrix.overview.totalPresentStudents).toBe(1);
-	});
-});
+		// Filter = pitch-fest
+		const pitchMatrix = buildAttendanceMatrix(allRegistrations, [pitchRecord], 'pitch-fest');
+		expect(pitchMatrix.teamRows).toHaveLength(1);
+		expect(pitchMatrix.teamRows[0].teamId).toBe('team-pitch-01');
+		expect(pitchMatrix.overview.totalRegisteredStudents).toBe(2);
+		expect(pitchMatrix.overview.totalPresentStudents).toBe(1);
+		expect(pitchMatrix.overview.totalNotCheckedInStudents).toBe(1);
+		expect(pitchMatrix.overview.overallAttendancePercentage).toBe(50);
 
-describe('CSV Export Generation', () => {
-	it('escapes cells according to RFC 4180', () => {
-		const headers = ['Name', 'Team Name', 'Notes'];
-		const rows = [
-			['John "The Coder" Doe', 'Team, Alpha', 'Line 1\nLine 2'],
-			['Simple Name', 'NormalTeam', 'Normal Note']
-		];
-
-		const csv = generateCsv(headers, rows);
-		expect(csv).toContain('"John ""The Coder"" Doe"');
-		expect(csv).toContain('"Team, Alpha"');
-		expect(csv).toContain('"Line 1\nLine 2"');
-		expect(csv).toContain('"Simple Name"');
+		// Filter = all
+		const allMatrix = buildAttendanceMatrix(allRegistrations, [pitchRecord], 'all');
+		expect(allMatrix.teamRows).toHaveLength(3);
+		expect(allMatrix.overview.totalRegisteredStudents).toBe(8); // 3 + 3 + 2
+		expect(allMatrix.overview.totalPresentStudents).toBe(1);
+		expect(allMatrix.overview.totalNotCheckedInStudents).toBe(7);
 	});
 });

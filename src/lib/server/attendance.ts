@@ -5,154 +5,24 @@ import {
 	getDoc,
 	getDocs,
 	setDoc,
-	updateDoc,
-	query,
-	where,
-	orderBy,
-	serverTimestamp,
-	writeBatch
+	serverTimestamp
 } from 'firebase/firestore';
 import {
 	ATTENDANCE_COLLECTIONS,
 	getParticipantKey,
 	getRecordId,
-	generateCsv,
-	type AttendanceSession,
 	type AttendanceRecord,
-	type AttendanceAuditLog,
 	type StudentAttendanceRow,
 	type TeamAttendanceRow,
 	type AttendanceOverviewStats,
-	type AttendanceSessionStatus,
-	type ParticipantAttendanceStatus
+	type TeamAttendanceStatus
 } from '$lib/attendance/model';
-import { COLLECTIONS as REG_COLLECTIONS, getAllTeamParticipants, type EventId, type Registration } from '$lib/registrations/model';
+import { COLLECTIONS as REG_COLLECTIONS, getAllTeamParticipants, type EventId } from '$lib/registrations/model';
+
+export { buildAttendanceMatrix } from '$lib/attendance/model';
 
 /**
- * Fetches all attendance sessions, ordered by creation date descending.
- */
-export async function getSessions(eventId?: EventId): Promise<AttendanceSession[]> {
-	const db = await adminDb();
-	const sessionsRef = collection(db, ATTENDANCE_COLLECTIONS.SESSIONS);
-	const snap = await getDocs(sessionsRef);
-
-	const sessions: AttendanceSession[] = snap.docs.map((d) => {
-		const data = d.data();
-		return {
-			id: d.id,
-			eventId: data.eventId,
-			eventName: data.eventName,
-			name: data.name,
-			date: data.date,
-			status: data.status as AttendanceSessionStatus,
-			notes: data.notes || '',
-			createdBy: data.createdBy,
-			createdAt: data.createdAt?.toMillis ? data.createdAt.toMillis() : (data.createdAt || Date.now()),
-			updatedAt: data.updatedAt?.toMillis ? data.updatedAt.toMillis() : (data.updatedAt || Date.now()),
-			finalizedAt: data.finalizedAt?.toMillis ? data.finalizedAt.toMillis() : (data.finalizedAt || null),
-			finalizedBy: data.finalizedBy || null
-		};
-	});
-
-	sessions.sort((a, b) => b.createdAt - a.createdAt);
-
-	if (eventId) {
-		return sessions.filter((s) => s.eventId === eventId);
-	}
-	return sessions;
-}
-
-/**
- * Creates a new attendance session.
- */
-export async function createSession(params: {
-	name: string;
-	eventId: EventId;
-	date: string;
-	notes?: string;
-	createdBy: string;
-}): Promise<AttendanceSession> {
-	const db = await adminDb();
-	const sessionsRef = collection(db, ATTENDANCE_COLLECTIONS.SESSIONS);
-	const newDocRef = doc(sessionsRef);
-
-	const eventName = params.eventId === 'pitch-fest' ? 'Pitch Fest' : 'Hackathon';
-	const now = Date.now();
-
-	const sessionData = {
-		eventId: params.eventId,
-		eventName,
-		name: params.name.trim(),
-		date: params.date.trim(),
-		status: 'open',
-		notes: (params.notes || '').trim(),
-		createdBy: params.createdBy,
-		createdAt: serverTimestamp(),
-		updatedAt: serverTimestamp(),
-		finalizedAt: null,
-		finalizedBy: null
-	};
-
-	await setDoc(newDocRef, sessionData);
-
-	return {
-		id: newDocRef.id,
-		eventId: params.eventId,
-		eventName,
-		name: params.name.trim(),
-		date: params.date.trim(),
-		status: 'open',
-		notes: (params.notes || '').trim(),
-		createdBy: params.createdBy,
-		createdAt: now,
-		updatedAt: now,
-		finalizedAt: null,
-		finalizedBy: null
-	};
-}
-
-/**
- * Updates session status (finalize or reopen) or notes.
- */
-export async function updateSession(
-	sessionId: string,
-	updates: {
-		status?: AttendanceSessionStatus;
-		name?: string;
-		notes?: string;
-		updatedBy: string;
-	}
-): Promise<void> {
-	const db = await adminDb();
-	const sessionRef = doc(db, ATTENDANCE_COLLECTIONS.SESSIONS, sessionId);
-	const snap = await getDoc(sessionRef);
-
-	if (!snap.exists()) {
-		throw new Error(`Session "${sessionId}" not found.`);
-	}
-
-	const payload: Record<string, unknown> = {
-		updatedAt: serverTimestamp()
-	};
-
-	if (updates.name !== undefined) payload.name = updates.name.trim();
-	if (updates.notes !== undefined) payload.notes = updates.notes.trim();
-
-	if (updates.status === 'finalized') {
-		payload.status = 'finalized';
-		payload.finalizedAt = serverTimestamp();
-		payload.finalizedBy = updates.updatedBy;
-	} else if (updates.status === 'open') {
-		payload.status = 'open';
-		payload.finalizedAt = null;
-		payload.finalizedBy = null;
-	}
-
-	await updateDoc(sessionRef, payload);
-}
-
-/**
- * Looks up a registered team in Firestore across both events.
+ * Looks up a registered team in Firestore across both events (Hackathon & Pitch Fest).
  */
 export async function findRegisteredTeam(teamId: string): Promise<{ event: EventId; docId: string; data: Record<string, any> } | null> {
 	const db = await adminDb();
@@ -173,19 +43,17 @@ export async function findRegisteredTeam(teamId: string): Promise<{ event: Event
 }
 
 /**
- * Fetches attendance records for a session.
+ * Fetches all attendance records from Firestore.
  */
-export async function getSessionRecords(sessionId: string): Promise<AttendanceRecord[]> {
+export async function getAllAttendanceRecords(eventId?: EventId): Promise<AttendanceRecord[]> {
 	const db = await adminDb();
 	const recordsRef = collection(db, ATTENDANCE_COLLECTIONS.RECORDS);
-	const q = query(recordsRef, where('sessionId', '==', sessionId));
-	const snap = await getDocs(q);
+	const snap = await getDocs(recordsRef);
 
-	return snap.docs.map((d) => {
+	const records: AttendanceRecord[] = snap.docs.map((d) => {
 		const data = d.data();
 		return {
 			id: d.id,
-			sessionId: data.sessionId,
 			eventId: data.eventId,
 			teamId: data.teamId,
 			teamName: data.teamName,
@@ -200,45 +68,38 @@ export async function getSessionRecords(sessionId: string): Promise<AttendanceRe
 			checkedInAt: data.checkedInAt?.toMillis ? data.checkedInAt.toMillis() : (data.checkedInAt || Date.now()),
 			checkedInBy: data.checkedInBy || '',
 			createdAt: data.createdAt?.toMillis ? data.createdAt.toMillis() : (data.createdAt || Date.now()),
-			updatedAt: data.updatedAt?.toMillis ? data.updatedAt.toMillis() : (data.updatedAt || Date.now())
+			updatedAt: data.updatedAt?.toMillis ? data.updatedAt.toMillis() : (data.updatedAt || Date.now()),
+			sessionId: data.sessionId
 		};
 	});
+
+	if (eventId) {
+		return records.filter((r) => r.eventId === eventId);
+	}
+	return records;
 }
 
 /**
- * Records individual student check-in.
- * Validates session open status, team registration, and member inclusion.
+ * Records individual student check-in without requiring a session.
+ * Validates team registration and team membership.
+ * Deterministic document ID ensures idempotent writes without duplicates.
  */
 export async function checkInStudent(params: {
-	sessionId: string;
 	teamId: string;
 	participantKey: string;
 	organizerEmail: string;
+	sessionId?: string;
 	overrideFinalized?: boolean;
 }): Promise<AttendanceRecord> {
 	const db = await adminDb();
 
-	// 1. Validate session
-	const sessionRef = doc(db, ATTENDANCE_COLLECTIONS.SESSIONS, params.sessionId);
-	const sessionSnap = await getDoc(sessionRef);
-	if (!sessionSnap.exists()) {
-		throw new Error('Attendance session does not exist.');
-	}
-	const sessionData = sessionSnap.data();
-	if (sessionData.status === 'finalized' && !params.overrideFinalized) {
-		throw new Error('This attendance session is finalized. Check-ins are closed unless explicitly authorized.');
-	}
-
-	// 2. Validate team registration
+	// 1. Validate team registration
 	const teamInfo = await findRegisteredTeam(params.teamId);
 	if (!teamInfo) {
 		throw new Error(`Team ID "${params.teamId}" is not registered in the system.`);
 	}
-	if (teamInfo.event !== sessionData.eventId) {
-		throw new Error(`Team belongs to ${teamInfo.event}, but this attendance session is for ${sessionData.eventName}.`);
-	}
 
-	// 3. Validate member in team
+	// 2. Validate member in team roster
 	const allParticipants = getAllTeamParticipants({
 		teamLeader: teamInfo.data.teamLeader,
 		members: teamInfo.data.members
@@ -249,8 +110,8 @@ export async function checkInStudent(params: {
 		throw new Error(`Participant "${params.participantKey}" is not a registered member of team "${teamInfo.data.teamName || params.teamId}".`);
 	}
 
-	// 4. Create record with deterministic ID
-	const recordId = getRecordId(params.sessionId, params.teamId, params.participantKey);
+	// 3. Create or retrieve record with deterministic ID
+	const recordId = getRecordId(params.teamId, params.participantKey);
 	const recordRef = doc(db, ATTENDANCE_COLLECTIONS.RECORDS, recordId);
 	const existingSnap = await getDoc(recordRef);
 
@@ -261,7 +122,6 @@ export async function checkInStudent(params: {
 		const existingData = existingSnap.data();
 		return {
 			id: recordId,
-			sessionId: params.sessionId,
 			eventId: teamInfo.event,
 			teamId: params.teamId,
 			teamName,
@@ -276,12 +136,12 @@ export async function checkInStudent(params: {
 			checkedInAt: existingData.checkedInAt?.toMillis ? existingData.checkedInAt.toMillis() : (existingData.checkedInAt || now),
 			checkedInBy: existingData.checkedInBy || params.organizerEmail,
 			createdAt: existingData.createdAt?.toMillis ? existingData.createdAt.toMillis() : (existingData.createdAt || now),
-			updatedAt: now
+			updatedAt: now,
+			sessionId: existingData.sessionId
 		};
 	}
 
-	const recordData = {
-		sessionId: params.sessionId,
+	const recordData: Record<string, any> = {
 		eventId: teamInfo.event,
 		teamId: params.teamId,
 		teamName,
@@ -299,11 +159,14 @@ export async function checkInStudent(params: {
 		updatedAt: serverTimestamp()
 	};
 
+	if (params.sessionId) {
+		recordData.sessionId = params.sessionId;
+	}
+
 	await setDoc(recordRef, recordData, { merge: true });
 
 	return {
 		id: recordId,
-		sessionId: params.sessionId,
 		eventId: teamInfo.event,
 		teamId: params.teamId,
 		teamName,
@@ -318,67 +181,7 @@ export async function checkInStudent(params: {
 		checkedInAt: now,
 		checkedInBy: params.organizerEmail,
 		createdAt: now,
-		updatedAt: now
+		updatedAt: now,
+		sessionId: params.sessionId
 	};
 }
-
-/**
- * Audited correction of an attendance record (e.g. marking absent, resetting, or overriding).
- */
-export async function correctAttendance(params: {
-	recordId: string;
-	newStatus: 'present' | 'not-checked-in' | 'absent';
-	reason: string;
-	organizerEmail: string;
-}): Promise<void> {
-	if (!params.reason || params.reason.trim().length < 3) {
-		throw new Error('A valid reason for the correction is required.');
-	}
-
-	const db = await adminDb();
-	const recordRef = doc(db, ATTENDANCE_COLLECTIONS.RECORDS, params.recordId);
-	const recordSnap = await getDoc(recordRef);
-
-	if (!recordSnap.exists()) {
-		throw new Error('Attendance record not found.');
-	}
-
-	const recordData = recordSnap.data();
-	const previousStatus = recordData.status || 'present';
-
-	const batch = writeBatch(db);
-
-	// Create audit log
-	const auditRef = doc(collection(db, ATTENDANCE_COLLECTIONS.AUDIT_LOGS));
-	batch.set(auditRef, {
-		recordId: params.recordId,
-		sessionId: recordData.sessionId,
-		eventId: recordData.eventId,
-		teamId: recordData.teamId,
-		teamName: recordData.teamName || '',
-		participantKey: recordData.participantKey,
-		studentName: recordData.studentName,
-		admissionNumber: recordData.admissionNumber,
-		previousStatus,
-		newStatus: params.newStatus,
-		reason: params.reason.trim(),
-		changedBy: params.organizerEmail,
-		timestamp: serverTimestamp()
-	});
-
-	if (params.newStatus === 'present') {
-		batch.update(recordRef, {
-			status: 'present',
-			checkedInAt: serverTimestamp(),
-			checkedInBy: params.organizerEmail,
-			updatedAt: serverTimestamp()
-		});
-	} else {
-		// If resetting or marking absent, delete the 'present' record so student is counted as not-checked-in or absent
-		batch.delete(recordRef);
-	}
-
-	await batch.commit();
-}
-
-export { buildAttendanceMatrix } from '$lib/attendance/model';

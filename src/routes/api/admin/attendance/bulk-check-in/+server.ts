@@ -7,10 +7,10 @@ export const POST: RequestHandler = async ({ request }) => {
 	const admin = await requireAdmin(request);
 	const body = await request.json();
 
-	const { sessionId, teamId, participantKeys, overrideFinalized } = body;
+	const { teamId, participantKeys } = body;
 
-	if (!sessionId || !teamId || !Array.isArray(participantKeys) || participantKeys.length === 0) {
-		return json({ error: 'sessionId, teamId, and an array of participantKeys are required.' }, { status: 400 });
+	if (!teamId || !Array.isArray(participantKeys) || participantKeys.length === 0) {
+		return json({ error: 'teamId and an array of participantKeys are required.' }, { status: 400 });
 	}
 
 	const results = [];
@@ -19,11 +19,9 @@ export const POST: RequestHandler = async ({ request }) => {
 	for (const participantKey of participantKeys) {
 		try {
 			const record = await checkInStudent({
-				sessionId,
 				teamId,
 				participantKey,
-				organizerEmail: admin.email,
-				overrideFinalized: Boolean(overrideFinalized)
+				organizerEmail: admin.email
 			});
 			results.push(record);
 		} catch (err: any) {

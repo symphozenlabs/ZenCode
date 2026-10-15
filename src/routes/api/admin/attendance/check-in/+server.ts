@@ -7,19 +7,17 @@ export const POST: RequestHandler = async ({ request }) => {
 	const admin = await requireAdmin(request);
 	const body = await request.json();
 
-	const { sessionId, teamId, participantKey, overrideFinalized } = body;
+	const { teamId, participantKey } = body;
 
-	if (!sessionId || !teamId || !participantKey) {
-		return json({ error: 'sessionId, teamId, and participantKey are required.' }, { status: 400 });
+	if (!teamId || !participantKey) {
+		return json({ error: 'teamId and participantKey are required.' }, { status: 400 });
 	}
 
 	try {
 		const record = await checkInStudent({
-			sessionId,
 			teamId,
 			participantKey,
-			organizerEmail: admin.email,
-			overrideFinalized: Boolean(overrideFinalized)
+			organizerEmail: admin.email
 		});
 		return json({ success: true, record });
 	} catch (err: any) {

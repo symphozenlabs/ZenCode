@@ -1,15 +1,12 @@
 <script lang="ts">
-	import { Search, Filter, CheckCircle2, Clock, AlertCircle, Edit, ArrowUpDown } from '@lucide/svelte';
+	import { Search, CheckCircle2, Clock, ArrowUpDown } from '@lucide/svelte';
 	import type { StudentAttendanceRow } from '$lib/attendance/model';
 	import { formatTimestamp } from '$lib/attendance/model';
-	import Button from '$lib/components/ui/Button.svelte';
 
 	let {
-		rows,
-		onCorrect
+		rows = []
 	}: {
 		rows: StudentAttendanceRow[];
-		onCorrect: (member: StudentAttendanceRow) => void;
 	} = $props();
 
 	let searchQuery = $state('');
@@ -40,7 +37,7 @@
 				);
 			})
 			.sort((a, b) => {
-				// Put present first or sort by check-in time / team
+				// Present first or sort by check-in time
 				if (a.status === 'present' && b.status !== 'present') return sortAsc ? 1 : -1;
 				if (a.status !== 'present' && b.status === 'present') return sortAsc ? -1 : 1;
 				return (b.checkedInAt || 0) - (a.checkedInAt || 0);
@@ -69,7 +66,6 @@
 				<option value="all">All Statuses</option>
 				<option value="present">Present Only</option>
 				<option value="not-checked-in">Not Checked In</option>
-				<option value="absent">Absent</option>
 			</select>
 
 			<select
@@ -103,7 +99,6 @@
 					<th class="px-4 py-3">Status</th>
 					<th class="px-4 py-3">Check-in Time</th>
 					<th class="px-4 py-3">Checked In By</th>
-					<th class="px-4 py-3 text-right">Action</th>
 				</tr>
 			</thead>
 			<tbody class="divide-y divide-border">
@@ -129,15 +124,11 @@
 						</td>
 						<td class="px-4 py-3">
 							{#if row.status === 'present'}
-								<span class="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-800">
+								<span class="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-[11px] font-bold text-emerald-800">
 									<CheckCircle2 class="size-3 text-emerald-600" /> Present
 								</span>
-							{:else if row.status === 'absent'}
-								<span class="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-bold text-destructive">
-									<AlertCircle class="size-3" /> Absent
-								</span>
 							{:else}
-								<span class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800">
+								<span class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-bold text-amber-800">
 									<Clock class="size-3" /> Not Checked In
 								</span>
 							{/if}
@@ -148,20 +139,10 @@
 						<td class="px-4 py-3 text-muted-foreground text-[11px]">
 							{row.checkedInBy || '—'}
 						</td>
-						<td class="px-4 py-3 text-right">
-							<button
-								type="button"
-								onclick={() => onCorrect(row)}
-								class="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-semibold text-primary hover:bg-muted"
-								title="Audited correction"
-							>
-								<Edit class="size-3" /> Correct
-							</button>
-						</td>
 					</tr>
 				{:else}
 					<tr>
-						<td colspan="8" class="px-4 py-12 text-center text-sm text-muted-foreground">
+						<td colspan="7" class="px-4 py-12 text-center text-sm text-muted-foreground">
 							No student records found matching the current filters.
 						</td>
 					</tr>
