@@ -187,13 +187,7 @@ service cloud.firestore {
     }
 
     // Attendance management (/admin/attendance). Organisers only.
-    match /attendance_sessions/{sessionId} {
-      allow read, write: if isAdmin();
-    }
     match /attendance_records/{recordId} {
-      allow read, write: if isAdmin();
-    }
-    match /attendance_audit_logs/{logId} {
       allow read, write: if isAdmin();
     }
 

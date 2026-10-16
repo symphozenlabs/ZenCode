@@ -205,6 +205,11 @@ export function buildAttendanceMatrix(
 			members: reg.members
 		});
 
+		// Exclude teams with no remaining registered members
+		if (participants.length === 0) {
+			continue;
+		}
+
 		const teamName = reg.teamName || `${reg.teamLeader.name || 'ZenCode'}'s Team`;
 		let teamPresentCount = 0;
 		const teamMemberRows: StudentAttendanceRow[] = [];
@@ -290,7 +295,7 @@ export function buildAttendanceMatrix(
 		totalPresentStudents,
 		totalNotCheckedInStudents,
 		overallAttendancePercentage,
-		totalTeams: filteredRegistrations.length,
+		totalTeams: teamRows.length,
 		teamsFullyPresent,
 		teamsPartiallyPresent,
 		teamsNoCheckIns

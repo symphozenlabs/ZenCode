@@ -124,53 +124,57 @@ export function searchFields(members: Pick<TeamMember, 'admissionNumber' | 'emai
 
 /** Returns all participants for a team, guaranteeing leader and all members are present and indexed. */
 export function getAllTeamParticipants(r: Pick<Registration, 'teamLeader' | 'members'>): NormalizedParticipant[] {
+	const leaderName = (r.teamLeader?.name || '').trim();
 	const leaderAdm = (r.teamLeader?.admissionNumber || '').trim().toUpperCase();
 	const leaderEmail = (r.teamLeader?.email || '').trim().toLowerCase();
+	const hasLeaderDetails = Boolean(leaderName || leaderAdm || leaderEmail);
 	const results: NormalizedParticipant[] = [];
 
 	if (Array.isArray(r.members) && r.members.length > 0) {
-		const hasLeaderDetails = Boolean(leaderAdm || leaderEmail);
 		let foundLeader = false;
 		r.members.forEach((m, idx) => {
+			const mName = (m.name || '').trim();
 			const mAdm = (m.admissionNumber || '').trim().toUpperCase();
 			const mEmail = (m.email || '').trim().toLowerCase();
+			if (!mName && !mAdm && !mEmail) return;
+
 			const isLead = hasLeaderDetails
-				? (Boolean(leaderAdm) && mAdm === leaderAdm) || (Boolean(leaderEmail) && mEmail === leaderEmail)
+				? (Boolean(leaderAdm) && mAdm === leaderAdm) || (Boolean(leaderEmail) && mEmail === leaderEmail) || (Boolean(leaderName) && mName === leaderName)
 				: m.memberNumber === 1 || idx === 0;
 			if (isLead) foundLeader = true;
 			results.push({
 				memberNumber: m.memberNumber || idx + 1,
-				name: m.name || '',
-				admissionNumber: m.admissionNumber || '',
+				name: mName,
+				admissionNumber: mAdm,
 				yearOfStudy: m.yearOfStudy || m.classSection || r.teamLeader?.yearOfStudy || r.teamLeader?.classSection || '',
 				classSection: m.classSection || m.yearOfStudy || '',
-				email: m.email || '',
+				email: mEmail,
 				isLeader: isLead
 			});
 		});
 
-		if (!foundLeader && (r.teamLeader?.name || r.teamLeader?.admissionNumber)) {
+		if (!foundLeader && hasLeaderDetails) {
 			results.unshift({
 				memberNumber: 1,
-				name: r.teamLeader.name || '',
-				admissionNumber: r.teamLeader.admissionNumber || '',
-				yearOfStudy: r.teamLeader.yearOfStudy || r.teamLeader.classSection || '',
-				classSection: r.teamLeader.classSection || r.teamLeader.yearOfStudy || '',
-				email: r.teamLeader.email || '',
+				name: leaderName,
+				admissionNumber: leaderAdm,
+				yearOfStudy: r.teamLeader?.yearOfStudy || r.teamLeader?.classSection || '',
+				classSection: r.teamLeader?.classSection || r.teamLeader?.yearOfStudy || '',
+				email: leaderEmail,
 				isLeader: true
 			});
 			results.forEach((p, i) => {
 				p.memberNumber = i + 1;
 			});
 		}
-	} else if (r.teamLeader?.name || r.teamLeader?.admissionNumber) {
+	} else if (hasLeaderDetails) {
 		results.push({
 			memberNumber: 1,
-			name: r.teamLeader.name || '',
-			admissionNumber: r.teamLeader.admissionNumber || '',
-			yearOfStudy: r.teamLeader.yearOfStudy || r.teamLeader.classSection || '',
-			classSection: r.teamLeader.classSection || r.teamLeader.yearOfStudy || '',
-			email: r.teamLeader.email || '',
+			name: leaderName,
+			admissionNumber: leaderAdm,
+			yearOfStudy: r.teamLeader?.yearOfStudy || r.teamLeader?.classSection || '',
+			classSection: r.teamLeader?.classSection || r.teamLeader?.yearOfStudy || '',
+			email: leaderEmail,
 			isLeader: true
 		});
 	}
