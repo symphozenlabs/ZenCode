@@ -424,4 +424,113 @@ describe('Simplified Attendance Matrix (Session-Free)', () => {
 		expect(allMatrix.overview.totalPresentStudents).toBe(1);
 		expect(allMatrix.overview.totalNotCheckedInStudents).toBe(7);
 	});
+
+	it('excludes teams with no remaining registered members from team lists and team counts', () => {
+		const emptyTeam: Registration = {
+			id: 'team-empty',
+			event: 'pitch-fest',
+			teamName: 'Empty Team',
+			teamSize: 0,
+			teamLeader: {
+				name: '',
+				admissionNumber: '',
+				classSection: '',
+				email: '',
+				mobileNumber: ''
+			},
+			members: [],
+			status: 'approved',
+			createdAt: 800,
+			reviewedBy: null,
+			emailDelivery: []
+		};
+
+		const matrix = buildAttendanceMatrix([mockPitchTeam, emptyTeam], [], 'pitch-fest');
+		expect(matrix.teamRows).toHaveLength(1);
+		expect(matrix.teamRows[0].teamId).toBe('team-pitch-01');
+		expect(matrix.overview.totalTeams).toBe(1);
+		expect(matrix.overview.teamsNoCheckIns).toBe(1);
+	});
+
+	it('safely handles orphaned attendance records when a participant or team is deleted from registration', () => {
+		// An orphaned attendance record for a deleted participant
+		const orphanedRecord: AttendanceRecord = {
+			id: 'deleted-team__25CAPMCA999',
+			eventId: 'pitch-fest',
+			teamId: 'deleted-team',
+			teamName: "Deleted Student's Team",
+			participantKey: '25CAPMCA999',
+			studentName: 'Deleted Student',
+			admissionNumber: '25CAPMCA999',
+			yearOfStudy: '2nd Year MCA',
+			email: 'deleted@example.com',
+			memberNumber: 1,
+			isLeader: true,
+			status: 'present',
+			checkedInAt: 3000,
+			checkedInBy: 'admin@example.com',
+			createdAt: 3000,
+			updatedAt: 3000
+		};
+
+		// Only mockPitchTeam exists in registration (Grace and Harry). The deleted student is not in registration.
+		const matrix = buildAttendanceMatrix([mockPitchTeam], [orphanedRecord], 'pitch-fest');
+
+		// Deleted student must NOT appear in studentRows
+		expect(matrix.studentRows.find((s) => s.participantKey === '25CAPMCA999')).toBeUndefined();
+		// Deleted team must NOT appear in teamRows
+		expect(matrix.teamRows.find((t) => t.teamId === 'deleted-team')).toBeUndefined();
+		// Registered student counts and present counts must NOT include the deleted participant
+		expect(matrix.overview.totalRegisteredStudents).toBe(2);
+		expect(matrix.overview.totalPresentStudents).toBe(0);
+		expect(matrix.overview.totalNotCheckedInStudents).toBe(2);
+		expect(matrix.overview.totalTeams).toBe(1);
+	});
+
+	it('identifies partially attended teams with correct member statuses, excluding full and zero check-ins', () => {
+		const aliceRecord: AttendanceRecord = {
+			id: 'team-alpha__25CAPMCA101',
+			eventId: 'hackathon',
+			teamId: 'team-alpha',
+			teamName: 'Alpha Innovators',
+			participantKey: '25CAPMCA101',
+			studentName: 'Alice Lead',
+			admissionNumber: '25CAPMCA101',
+			yearOfStudy: '1st Year MCA',
+			email: 'alice@alpha.com',
+			memberNumber: 1,
+			isLeader: true,
+			status: 'present',
+			checkedInAt: 1500,
+			checkedInBy: 'organizer@zencode.com',
+			createdAt: 1500,
+			updatedAt: 1500
+		};
+
+		// Team Alpha has 1 of 3 present (Partially Present)
+		// Team Beta has 0 of 3 present (No Check-ins)
+		const matrix = buildAttendanceMatrix(mockHackathonTeams, [aliceRecord], 'hackathon');
+
+		// Filter for partially attended teams
+		const partiallyAttended = matrix.teamRows.filter(
+			(t) => t.presentCount > 0 && t.notCheckedInCount > 0
+		);
+
+		expect(partiallyAttended).toHaveLength(1);
+		expect(partiallyAttended[0].teamName).toBe('Alpha Innovators');
+		expect(partiallyAttended[0].presentCount).toBe(1);
+		expect(partiallyAttended[0].registeredMemberCount).toBe(3);
+
+		// Verify members
+		const members = partiallyAttended[0].members;
+		expect(members[0].studentName).toBe('Alice Lead');
+		expect(members[0].status).toBe('present');
+		expect(members[1].studentName).toBe('Bob Two');
+		expect(members[1].status).toBe('not-checked-in');
+		expect(members[2].studentName).toBe('Charlie Three');
+		expect(members[2].status).toBe('not-checked-in');
+
+		// Team Beta (0 check-ins) is excluded from partially attended
+		expect(partiallyAttended.find((t) => t.teamId === 'team-beta')).toBeUndefined();
+	});
 });

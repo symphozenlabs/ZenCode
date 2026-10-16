@@ -1,9 +1,8 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { browser } from '$app/environment';
-	import { Camera, CameraOff, Search, AlertTriangle, CheckCircle, RefreshCw, Volume2, VolumeX } from '@lucide/svelte';
+	import { Camera, CameraOff, AlertTriangle, CheckCircle, RefreshCw, Volume2, VolumeX, ClipboardCheck, ShieldCheck } from '@lucide/svelte';
 	import Button from '$lib/components/ui/Button.svelte';
-	import Field from '$lib/components/ui/Field.svelte';
 	import Spinner from '$lib/components/ui/Spinner.svelte';
 	import { extractTeamIdFromQr } from '$lib/attendance/model';
 
@@ -23,8 +22,6 @@
 	let isStarting = $state(false);
 	let permissionDenied = $state(false);
 	let permissionError = $state('');
-	let manualInput = $state('');
-	let manualError = $state('');
 	let scanStatus = $state<'idle' | 'scanning' | 'success' | 'cooldown' | 'error'>('idle');
 	let statusMessage = $state('Camera is standby. Click Start Scanner when ready.');
 	let soundEnabled = $state(true);
@@ -137,9 +134,9 @@
 				permissionDenied = true;
 				permissionError = 'Camera permission was denied. Please allow camera access in your browser settings to scan QR passes.';
 			} else if (/not found|no camera/i.test(msg)) {
-				permissionError = 'No camera found on this device. Use manual Team ID search below.';
+				permissionError = 'No camera found on this device. Please connect a camera to scan QR passes.';
 			} else {
-				permissionError = 'Could not start camera. Please verify device permissions or use manual lookup.';
+				permissionError = 'Could not start camera. Please verify camera device permissions.';
 			}
 			scanStatus = 'error';
 			statusMessage = permissionError;
@@ -197,25 +194,6 @@
 				statusMessage = 'Point camera at team QR pass…';
 			}
 		}, 2000);
-	}
-
-	function handleManualSubmit(e: SubmitEvent) {
-		e.preventDefault();
-		manualError = '';
-		const trimmed = manualInput.trim();
-		if (!trimmed) {
-			manualError = 'Please enter a Team ID or Reference ID.';
-			return;
-		}
-
-		const cleanId = extractTeamIdFromQr(trimmed);
-		if (!cleanId) {
-			manualError = 'Invalid Team ID format.';
-			return;
-		}
-
-		playSuccessBeep();
-		onTeamFound(cleanId);
 	}
 </script>
 
@@ -322,41 +300,43 @@
 		</div>
 	</div>
 
-	<!-- Right: Manual Search Fallback & Instructions (5 cols) -->
+	<!-- Right: Organizer Desk Instructions & Guidelines (5 cols) -->
 	<div class="lg:col-span-5 space-y-4">
-		<!-- Manual Lookup Card -->
+		<!-- Organizer Desk Instructions -->
 		<div class="rounded-xl border border-border bg-card p-5 shadow-xs">
 			<div class="flex items-center gap-2 pb-3 border-b border-border">
-				<Search class="size-5 text-primary" />
-				<h3 class="font-bold text-foreground">Manual Team Search</h3>
+				<ClipboardCheck class="size-5 text-primary" />
+				<h3 class="font-bold text-foreground">Organizer Desk Instructions</h3>
 			</div>
 
-			<p class="mt-3 text-xs text-muted-foreground">
-				If the participant does not have their QR or the camera is unavailable, search directly by Team ID or Reference ID.
-			</p>
+			<div class="mt-4 space-y-3 text-xs text-muted-foreground">
+				<div class="rounded-lg bg-muted/50 p-3 border border-border">
+					<p class="font-semibold text-foreground mb-1">1. Scan Team QR Pass</p>
+					<p>Ask the team leader or any arriving member to present their official ZenCode pass (on screen or printed).</p>
+				</div>
 
-			<form onsubmit={handleManualSubmit} class="mt-4 space-y-3">
-				<Field
-					label="Team ID or Pass URL"
-					bind:value={manualInput}
-					error={manualError}
-					placeholder="e.g. 5xJ2k9aP or ZC-5XJ2K9"
-				/>
+				<div class="rounded-lg bg-muted/50 p-3 border border-border">
+					<p class="font-semibold text-foreground mb-1">2. Verify Physical Presence & ID</p>
+					<p>Cross-check each student present at the desk against their college ID card, name, and admission number.</p>
+				</div>
 
-				<Button type="submit" variant="default" class="w-full">
-					<Search class="size-4" /> Find Team Roster
-				</Button>
-			</form>
+				<div class="rounded-lg bg-muted/50 p-3 border border-border">
+					<p class="font-semibold text-foreground mb-1">3. Record Check-In</p>
+					<p>Click <strong>Mark Present</strong> next to each physically present student, or <strong>Mark All Present</strong> if the whole team has reported.</p>
+				</div>
+			</div>
 		</div>
 
-		<!-- Quick Scanning Tips -->
+		<!-- Protocol & Verification Card -->
 		<div class="rounded-xl border border-border bg-card/60 p-5">
-			<h4 class="text-sm font-bold text-foreground mb-2">Organizer Desk Instructions</h4>
+			<div class="flex items-center gap-2 mb-2 text-foreground">
+				<ShieldCheck class="size-4 text-emerald-600" />
+				<h4 class="text-xs font-bold uppercase tracking-wider">Attendance Protocol</h4>
+			</div>
 			<ul class="text-xs text-muted-foreground space-y-2 list-disc list-inside">
-				<li>Have the team leader or any member present their pass on their phone screen or printed PDF.</li>
-				<li>Ensure good screen brightness and hold the phone steady 15–20 cm in front of the lens.</li>
-				<li>Verify each physically present member against their college ID card and admission number.</li>
-				<li>Click <strong>Mark Present</strong> for each member present at the desk.</li>
+				<li>Hold phone passes 15–20 cm in front of the lens with screen brightness turned up.</li>
+				<li>Attendance status updates immediately to Firestore across all organizer devices.</li>
+				<li>Late members from partially attended teams can scan the same team QR later to check in.</li>
 			</ul>
 		</div>
 	</div>

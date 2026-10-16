@@ -41,7 +41,7 @@
 
 	const matrix = $derived(attendance.matrix);
 
-	// When team is found by QR Scanner or Manual Search
+	// When team is found by QR Scanner
 	function handleTeamFound(teamId: string) {
 		const cleanId = teamId.trim();
 		actionError = null;
@@ -190,8 +190,13 @@
 {#if activeTab === 'overview'}
 	<AttendanceOverview
 		overview={matrix.overview}
+		teamRows={matrix.teamRows}
 		eventFilter={attendance.eventFilter}
 		onOpenScanner={() => setTab('scanner')}
+		onSelectTeam={(team) => {
+			selectedTeamRow = team;
+			setTab('scanner');
+		}}
 	/>
 {:else if activeTab === 'scanner'}
 	<div class="space-y-6">

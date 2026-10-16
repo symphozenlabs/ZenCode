@@ -74,10 +74,12 @@ class AttendanceStore {
 
 	subscribe() {
 		this.#refs++;
+		const unsubReg = registrations.subscribe();
 		if (!this.#unsubs.length) {
 			this.#listenRecords();
 		}
 		return () => {
+			unsubReg();
 			if (--this.#refs <= 0) {
 				this.#stop();
 			}
