@@ -9,6 +9,7 @@
 		Code2,
 		Presentation,
 		Printer,
+		Save,
 		Search,
 		Ban,
 		RotateCcw,
@@ -144,16 +145,19 @@
 	);
 
 	let query = $state('');
-	let show = $state<'all' | 'issued' | 'pending'>('all');
+	let show = $state<'all' | 'issued' | 'pending' | 'unsent'>('all');
 	const selected = new SvelteSet<string>();
 	const expanded = new SvelteSet<string>();
 
 	const held = (r: Row) => Boolean(r.issue && !r.issue.revoked);
+	/** Issued and saved, but not emailed to its holder yet. */
+	const unsent = (r: Row) => held(r) && !r.issue!.emailedAt;
 
 	const counts = $derived({
 		all: teams.length,
 		pending: teams.filter((t) => !t.rows.every(held)).length,
-		issued: teams.filter((t) => t.rows.some(held)).length
+		issued: teams.filter((t) => t.rows.some(held)).length,
+		unsent: teams.filter((t) => t.rows.some(unsent)).length
 	});
 
 	const visible = $derived.by(() => {
@@ -161,6 +165,7 @@
 		return teams.filter((t) => {
 			if (show === 'issued' && !t.rows.some(held)) return false;
 			if (show === 'pending' && t.rows.every(held)) return false;
+			if (show === 'unsent' && !t.rows.some(unsent)) return false;
 			if (!q) return true;
 			return [t.label, referenceId(t.reg.id), ...t.rows.flatMap((r) => [r.name, r.admissionNumber, r.email, r.issue?.code])].some((v) =>
 				String(v ?? '').toLowerCase().includes(q)
@@ -242,7 +247,12 @@
 		if (!win) goto(url);
 	}
 
-	async function issue(then: 'print' | 'email') {
+	/**
+	 * Issues the selection. 'save' only stores the certificates: nobody is
+	 * emailed, and the selection stays so they can be printed and checked
+	 * before the soft copies go out with "Email issued".
+	 */
+	async function issue(then: 'save' | 'print' | 'email') {
 		if (!template || !chosen.length) return;
 		issuing = true;
 		let codes: string[] = [];
@@ -261,8 +271,13 @@
 				award,
 				existing
 			});
-			certToast.showToast(`${codes.length} certificate${codes.length === 1 ? '' : 's'} issued.`, 'success');
-			selected.clear();
+			const many = `${codes.length} certificate${codes.length === 1 ? '' : 's'}`;
+			if (then === 'save') {
+				certToast.showToast(`${many} saved. Nobody has been emailed yet — print to check, then email them.`, 'success');
+			} else {
+				certToast.showToast(`${many} issued.`, 'success');
+				selected.clear();
+			}
 			await loadExisting();
 		} catch (err) {
 			console.error('[certificates] issuing failed', err);
@@ -272,7 +287,7 @@
 			issuing = false;
 		}
 		if (then === 'print') openPrint(codes);
-		else await sendEmails(codes);
+		else if (then === 'email') await sendEmails(codes);
 	}
 
 	/**
@@ -382,7 +397,8 @@
 				<h1 class="mt-2 truncate text-2xl font-semibold tracking-tight text-foreground">Issue “{template.name}”</h1>
 				<p class="mt-1 max-w-2xl text-sm text-muted-foreground">
 					Choose the event, then tick the teams (or single members) who should get this certificate. Every member gets their own
-					certificate and verification code, emailed as a PDF to the address they registered with.
+					certificate and verification code. Save them first to print and check them; nobody is emailed until you choose to send
+					the PDF to the address they registered with.
 				</p>
 			</div>
 		</div>
@@ -410,7 +426,7 @@
 				<section class="overflow-hidden rounded-lg border border-border bg-card">
 					<div class="flex flex-wrap items-center justify-between gap-3 border-b border-border p-3">
 						<div class="inline-flex rounded-md border border-border bg-muted p-0.5" role="tablist" aria-label="Show">
-							{#each [['all', 'All teams'], ['pending', 'Not issued'], ['issued', 'Issued']] as const as [key, label] (key)}
+							{#each [['all', 'All teams'], ['pending', 'Not issued'], ['issued', 'Issued'], ['unsent', 'Not emailed']] as const as [key, label] (key)}
 								<button
 									type="button"
 									role="tab"
@@ -536,7 +552,11 @@
 																<span class="flex items-center justify-end gap-1 font-sans text-[11px] text-primary" title="Emailed to {r.issue.emailedTo}">
 																	<MailCheck class="size-3" /> Emailed
 																</span>
-															{:else if r.issue.award}<span class="block font-sans text-[11px] text-muted-foreground">{r.issue.award}</span>{/if}
+															{:else if !r.issue.revoked}
+															<span class="block font-sans text-[11px] text-muted-foreground">
+																{r.issue.award ? `${r.issue.award} · ` : ''}Saved, not emailed
+															</span>
+														{:else if r.issue.award}<span class="block font-sans text-[11px] text-muted-foreground">{r.issue.award}</span>{/if}
 														</span>
 														<button
 															type="button"
@@ -561,7 +581,13 @@
 					{:else}
 						<StateMessage
 							icon={Users}
-							title={show === 'issued' ? 'None issued yet.' : query ? 'No team matches that search.' : 'No teams registered yet.'}
+							title={query
+								? 'No team matches that search.'
+								: show === 'issued'
+									? 'None issued yet.'
+									: show === 'unsent'
+										? 'Every issued certificate has been emailed.'
+										: 'No teams registered yet.'}
 						/>
 					{/if}
 				</section>
@@ -624,13 +650,18 @@
 							</div>
 						{/if}
 
-						<Button class="w-full" size="lg" disabled={!chosen.length || busy} loading={issuing} onclick={() => issue('email')}>
-							{#if !issuing}<Mail class="size-4" />{/if}
-							{#if issuing}Issuing…{:else if chosen.length}Issue &amp; email {chosen.length} ({chosenTeams} team{chosenTeams === 1 ? '' : 's'}){:else}Select teams to issue{/if}
+						<Button class="w-full" size="lg" disabled={!chosen.length || busy} loading={issuing} onclick={() => issue('save')}>
+							{#if !issuing}<Save class="size-4" />{/if}
+							{#if issuing}Issuing…{:else if chosen.length}Save {chosen.length} ({chosenTeams} team{chosenTeams === 1 ? '' : 's'}) — don’t email yet{:else}Select teams to issue{/if}
 						</Button>
-						<Button class="w-full" variant="outline" disabled={!chosen.length || busy} onclick={() => issue('print')}>
-							<Printer class="size-4" /> Issue &amp; print instead
-						</Button>
+						<div class="grid grid-cols-2 gap-2">
+							<Button variant="outline" disabled={!chosen.length || busy} onclick={() => issue('print')}>
+								<Printer class="size-4" /> Save &amp; print
+							</Button>
+							<Button variant="outline" disabled={!chosen.length || busy} onclick={() => issue('email')}>
+								<Mail class="size-4" /> Save &amp; email
+							</Button>
+						</div>
 						{#if noEmail}
 							<p class="text-center text-[12px] text-destructive">
 								{noEmail} selected {noEmail === 1 ? 'person has' : 'people have'} no email on their registration. Print theirs instead.
@@ -641,13 +672,18 @@
 								{alreadyHeld} of these already hold it. They keep their code and get the latest design{award.trim() ? ' and award' : ''}.
 							</p>
 						{/if}
-						<div class="grid grid-cols-2 gap-2 border-t border-border pt-3">
-							<Button variant="ghost" size="sm" disabled={!allRows.some(held) || busy} onclick={emailIssued}>
-								<Mail class="size-4" /> Email issued{selected.size ? ' (selected)' : ''}
-							</Button>
-							<Button variant="ghost" size="sm" disabled={!allRows.some(held)} onclick={printIssued}>
-								<Printer class="size-4" /> Reprint{selected.size ? ' (selected)' : ''}
-							</Button>
+						<div class="border-t border-border pt-3">
+							<p class="mb-2 text-[12px] text-muted-foreground">
+								Already saved{selected.size ? ' (selected)' : ''}: print to check them, then send the soft copies.
+							</p>
+							<div class="grid grid-cols-2 gap-2">
+								<Button variant="outline" size="sm" disabled={!allRows.some(held)} onclick={printIssued}>
+									<Printer class="size-4" /> Print issued
+								</Button>
+								<Button variant="outline" size="sm" disabled={!allRows.some(held) || busy} onclick={emailIssued}>
+									<Mail class="size-4" /> Email issued
+								</Button>
+							</div>
 						</div>
 					</div>
 				</div>
