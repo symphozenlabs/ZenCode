@@ -281,6 +281,21 @@ const toJpeg = (canvas, quality) =>
 	);
 
 /**
+ * The certificate as a full-quality PNG, at 300 DPI (the page is laid out at
+ * 96 px to the inch), held under ~50 megapixels for oversized pages.
+ *
+ * @returns {Promise<Blob>}
+ */
+export async function certificatePng(design, values, qrText) {
+	const { width, height } = design.page;
+	const scale = Math.min(300 / 96, Math.sqrt(50_000_000 / (width * height)));
+	const canvas = await drawCertificate(design, values, qrText, scale);
+	return new Promise((resolve, reject) =>
+		canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('Could not draw the certificate.'))), 'image/png')
+	);
+}
+
+/**
  * The certificate as a PDF, kept under `maxBytes` (servers cap request
  * bodies) by stepping the image quality down, then the resolution.
  *
