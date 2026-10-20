@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { SvelteSet } from 'svelte/reactivity';
 	import {
@@ -7,8 +6,8 @@
 		ChevronDown,
 		CloudOff,
 		Code2,
+		FileArchive,
 		Presentation,
-		Printer,
 		Save,
 		Search,
 		Ban,
@@ -44,6 +43,8 @@
 		type IssuedCertificate,
 		type Recipient
 	} from '$lib/certificates/store';
+	import { certificatePng } from '$lib/certificates/render.js';
+	import { saveBlob, zipBlob } from '$lib/certificates/zip.js';
 	import { certToast } from '$lib/certificates/toast.svelte';
 
 	$effect(() => siteConfig.subscribe());
@@ -234,25 +235,31 @@
 	});
 	let previewWidth = $state(416);
 
-	// ── Issue, print and email ──
+	// ── Issue, download and email ──
 	let issuing = $state(false);
 	/** Emailing progress, while it runs */
 	let sending = $state<{ done: number; total: number; failed: number } | null>(null);
-	const busy = $derived(issuing || sending !== null);
-	const noEmail = $derived(chosen.filter((r) => !r.email.trim()).length);
+	/** Drawing images for the ZIP, while it runs */
+	let zipping = $state<{ done: number; total: number } | null>(null);
+	const busy = $derived(issuing || sending !== null || zipping !== null);
+	const notIssued = $derived(chosen.filter((r) => !r.issue).length);
+	const revokedChosen = $derived(chosen.filter((r) => r.issue?.revoked).length);
 
-	function openPrint(codes: string[]) {
-		const url = `/admin/certificates/print?codes=${codes.join(',')}`;
-		const win = window.open(url, '_blank');
-		if (!win) goto(url);
-	}
+	const asRecipient = ({ registrationId, memberNumber, name, admissionNumber, teamName }: Row): Recipient => ({
+		registrationId,
+		memberNumber,
+		name,
+		admissionNumber,
+		teamName
+	});
+	const noEmail = $derived(chosen.filter((r) => !r.email.trim()).length);
 
 	/**
 	 * Issues the selection. 'save' only stores the certificates: nobody is
-	 * emailed, and the selection stays so they can be printed and checked
+	 * emailed, and the selection stays so they can be downloaded and checked
 	 * before the soft copies go out with "Email issued".
 	 */
-	async function issue(then: 'save' | 'print' | 'email') {
+	async function issue(then: 'save' | 'email') {
 		if (!template || !chosen.length) return;
 		issuing = true;
 		let codes: string[] = [];
@@ -261,19 +268,13 @@
 				template,
 				event,
 				facts,
-				recipients: chosen.map(({ registrationId, memberNumber, name, admissionNumber, teamName }) => ({
-					registrationId,
-					memberNumber,
-					name,
-					admissionNumber,
-					teamName
-				})),
+				recipients: chosen.map(asRecipient),
 				award,
 				existing
 			});
 			const many = `${codes.length} certificate${codes.length === 1 ? '' : 's'}`;
 			if (then === 'save') {
-				certToast.showToast(`${many} saved. Nobody has been emailed yet — print to check, then email them.`, 'success');
+				certToast.showToast(`${many} saved. Nobody has been emailed yet — download to check, then email them.`, 'success');
 			} else {
 				certToast.showToast(`${many} issued.`, 'success');
 				selected.clear();
@@ -286,8 +287,7 @@
 		} finally {
 			issuing = false;
 		}
-		if (then === 'print') openPrint(codes);
-		else if (then === 'email') await sendEmails(codes);
+		if (then === 'email') await sendEmails(codes);
 	}
 
 	/**
@@ -332,18 +332,48 @@
 		}
 	}
 
+	const safeName = (s: string) =>
+		s.replace(/[\\/:*?"<>|\x00-\x1f]+/g, '-').replace(/\s+/g, ' ').trim().slice(0, 100) || 'certificate';
+
+	/**
+	 * Downloads the selection as one ZIP of full-quality PNGs, one per person.
+	 * Anyone selected who doesn't hold the certificate yet is issued it first
+	 * (a revoked one is restored, keeping its code), so every image carries a
+	 * real code; nobody is emailed.
+	 */
+	async function downloadZip() {
+		if (!template || !chosen.length) return;
+		const rows = chosen;
+		const missing = rows.filter((r) => !held(r));
+		zipping = { done: 0, total: rows.length };
+		try {
+			const fresh = missing.length
+				? await issueCertificates({ template, event, facts, recipients: missing.map(asRecipient), award, existing })
+				: [];
+			const issues = await getIssues([...rows.flatMap((r) => (held(r) ? [r.issue!.code] : [])), ...fresh]);
+			const files: { name: string; data: Blob }[] = [];
+			for (const one of issues) {
+				files.push({
+					name: `${safeName(one.teamName)} - ${safeName(one.name)} - ${one.code}.png`,
+					data: await certificatePng(one.design, one.values, verifyUrl(one.code))
+				});
+				zipping = { done: files.length, total: issues.length };
+			}
+			saveBlob(await zipBlob(files), `${safeName(`${template.name} - ${facts.title}`)}.zip`);
+			const saved = missing.length ? ` ${missing.length} newly saved (not emailed).` : '';
+			certToast.showToast(`Downloaded ${files.length} certificate${files.length === 1 ? '' : 's'}.${saved}`, 'success');
+		} catch (err) {
+			console.error('[certificates] zip download failed', err);
+			certToast.showToast((err as Error).message || 'Could not make the ZIP.', 'error');
+		} finally {
+			zipping = null;
+			if (missing.length) await loadExisting();
+		}
+	}
+
 	/** Issued certificates among the selection, or every issued one when nothing is selected. */
 	function issuedCodes() {
 		return allRows.filter((r) => held(r) && (selected.size ? selected.has(r.key) : true)).map((r) => r.issue!.code);
-	}
-
-	function printIssued() {
-		const codes = issuedCodes();
-		if (!codes.length) {
-			certToast.showToast('Nobody selected holds this certificate yet.', 'info');
-			return;
-		}
-		openPrint(codes);
 	}
 
 	function emailIssued() {
@@ -397,7 +427,7 @@
 				<h1 class="mt-2 truncate text-2xl font-semibold tracking-tight text-foreground">Issue “{template.name}”</h1>
 				<p class="mt-1 max-w-2xl text-sm text-muted-foreground">
 					Choose the event, then tick the teams (or single members) who should get this certificate. Every member gets their own
-					certificate and verification code. Save them first to print and check them; nobody is emailed until you choose to send
+					certificate and verification code. Save them or download them as images to check them; nobody is emailed until you choose to send
 					the PDF to the address they registered with.
 				</p>
 			</div>
@@ -484,6 +514,7 @@
 								{@const state = teamState(t)}
 								{@const open = expanded.has(t.reg.id)}
 								{@const issuedHere = t.rows.filter(held).length}
+								{@const revokedHere = t.rows.filter((r) => r.issue?.revoked).length}
 								<li class="border-b border-border last:border-b-0">
 									<div
 										class="flex items-center gap-3 px-3 py-2.5 transition-colors
@@ -507,7 +538,7 @@
 											</span>
 										</button>
 										<span class="hidden w-28 text-[12px] sm:block {issuedHere ? 'text-primary' : 'text-muted-foreground'}">
-											{issuedHere ? `${issuedHere} of ${t.rows.length} issued` : 'Not issued'}
+											{issuedHere ? `${issuedHere} of ${t.rows.length} issued` : revokedHere ? 'Revoked' : 'Not issued'}
 										</span>
 										<button
 											type="button"
@@ -650,21 +681,41 @@
 							</div>
 						{/if}
 
+						{#if zipping}
+							<div class="rounded-md border border-border bg-muted px-3 py-2.5 text-[12.5px]" aria-live="polite">
+								<div class="flex items-center justify-between gap-2 font-medium text-foreground">
+									<span class="flex items-center gap-2"><Spinner class="size-3.5" /> Drawing certificates…</span>
+									<span class="tabular">{zipping.done} / {zipping.total}</span>
+								</div>
+								<div class="mt-2 h-1.5 overflow-hidden rounded-full bg-border">
+									<div class="h-full bg-primary transition-[width]" style:width="{(zipping.done / zipping.total) * 100}%"></div>
+								</div>
+								<p class="mt-1.5 text-muted-foreground">Keep this tab open; the ZIP downloads when it finishes.</p>
+							</div>
+						{/if}
+
 						<Button class="w-full" size="lg" disabled={!chosen.length || busy} loading={issuing} onclick={() => issue('save')}>
 							{#if !issuing}<Save class="size-4" />{/if}
 							{#if issuing}Issuing…{:else if chosen.length}Save {chosen.length} ({chosenTeams} team{chosenTeams === 1 ? '' : 's'}) — don’t email yet{:else}Select teams to issue{/if}
 						</Button>
-						<div class="grid grid-cols-2 gap-2">
-							<Button variant="outline" disabled={!chosen.length || busy} onclick={() => issue('print')}>
-								<Printer class="size-4" /> Save &amp; print
+						<Button class="w-full" variant="outline" disabled={!chosen.length || busy} onclick={() => issue('email')}>
+							<Mail class="size-4" /> Save &amp; email
+						</Button>
+						{#if chosen.length}
+							<Button class="w-full" variant="outline" disabled={busy} loading={zipping !== null} onclick={downloadZip}>
+								{#if !zipping}<FileArchive class="size-4" />{/if}
+								Download {chosen.length} as ZIP (PNG images)
 							</Button>
-							<Button variant="outline" disabled={!chosen.length || busy} onclick={() => issue('email')}>
-								<Mail class="size-4" /> Save &amp; email
-							</Button>
-						</div>
+							{#if notIssued || revokedChosen}
+								<p class="-mt-1 text-center text-[12px] text-muted-foreground">
+									{#if notIssued}{notIssued} not issued yet will be saved first (not emailed).{/if}
+									{#if revokedChosen}{revokedChosen} revoked will be restored.{/if}
+								</p>
+							{/if}
+						{/if}
 						{#if noEmail}
 							<p class="text-center text-[12px] text-destructive">
-								{noEmail} selected {noEmail === 1 ? 'person has' : 'people have'} no email on their registration. Print theirs instead.
+								{noEmail} selected {noEmail === 1 ? 'person has' : 'people have'} no email on their registration. Download theirs as a ZIP instead.
 							</p>
 						{/if}
 						{#if alreadyHeld}
@@ -674,16 +725,11 @@
 						{/if}
 						<div class="border-t border-border pt-3">
 							<p class="mb-2 text-[12px] text-muted-foreground">
-								Already saved{selected.size ? ' (selected)' : ''}: print to check them, then send the soft copies.
+								Already saved{selected.size ? ' (selected)' : ''}: download to check them, then send the soft copies.
 							</p>
-							<div class="grid grid-cols-2 gap-2">
-								<Button variant="outline" size="sm" disabled={!allRows.some(held)} onclick={printIssued}>
-									<Printer class="size-4" /> Print issued
-								</Button>
-								<Button variant="outline" size="sm" disabled={!allRows.some(held) || busy} onclick={emailIssued}>
-									<Mail class="size-4" /> Email issued
-								</Button>
-							</div>
+							<Button class="w-full" variant="outline" size="sm" disabled={!allRows.some(held) || busy} onclick={emailIssued}>
+								<Mail class="size-4" /> Email issued{selected.size ? ' (selected)' : ''}
+							</Button>
 						</div>
 					</div>
 				</div>
