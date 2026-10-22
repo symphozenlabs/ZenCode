@@ -5,6 +5,9 @@ import {
 	getDoc,
 	getDocs,
 	setDoc,
+	deleteDoc,
+	query,
+	where,
 	serverTimestamp
 } from 'firebase/firestore';
 import {
@@ -184,4 +187,25 @@ export async function checkInStudent(params: {
 		updatedAt: now,
 		sessionId: params.sessionId
 	};
+}
+
+/**
+ * Revokes a student's check-in (false attendance) by deleting their records.
+ * The attendance matrix also matches records by participantKey alone (e.g. a
+ * record left under an older team ID), so every record for that participant
+ * is removed, not just the one under `teamId`. Returns false when there was
+ * nothing to revoke.
+ */
+export async function revokeCheckIn(params: { teamId: string; participantKey: string }): Promise<boolean> {
+	const db = await adminDb();
+	const recordsRef = collection(db, ATTENDANCE_COLLECTIONS.RECORDS);
+	const snap = await getDocs(query(recordsRef, where('participantKey', '==', params.participantKey)));
+	const refs = snap.docs.map((d) => d.ref);
+
+	const exactRef = doc(db, ATTENDANCE_COLLECTIONS.RECORDS, getRecordId(params.teamId, params.participantKey));
+	if (!refs.some((r) => r.id === exactRef.id) && (await getDoc(exactRef)).exists()) refs.push(exactRef);
+
+	if (!refs.length) return false;
+	await Promise.all(refs.map((r) => deleteDoc(r)));
+	return true;
 }

@@ -11,6 +11,8 @@
 	import { createSession as createFlappySession } from '$lib/games/flappy/api';
 	import { DURATIONS as FLAP_DURATIONS, durationLabel, type FlapSession } from '$lib/games/flappy/types';
 	import { isFlyGame } from '$lib/games/flappy/skins';
+	import { createTournament } from '$lib/games/word-heist/api';
+	import { DEFAULT_RULES, ROUND_DURATIONS, RULE_LIMITS, type HeistSession } from '$lib/games/word-heist/types';
 	import { formatTimestamp } from '$lib/utils/format';
 	import PageHeader from '$lib/components/admin/PageHeader.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -24,7 +26,7 @@
 	import GradientOrb from '$lib/components/motion/GradientOrb.svelte';
 	import SessionStatusBadge from '$lib/components/games/SessionStatusBadge.svelte';
 
-	type AnySession = LiveSession | FlapSession;
+	type AnySession = LiveSession | FlapSession | HeistSession;
 	let sessions = $state<AnySession[]>([]);
 	let status = $state<'loading' | 'ready' | 'error'>('loading');
 	let attempt = $state(0);
@@ -66,12 +68,32 @@
 	let fixedQuestions = $state<WordQuestion[]>([]);
 	let questionProblem = $state('');
 	let flapDuration = $state('180');
+	let heist = $state({
+		roundSeconds: String(DEFAULT_RULES.roundSeconds),
+		minWordLength: String(DEFAULT_RULES.minWordLength),
+		maxCreateLength: String(DEFAULT_RULES.maxCreateLength),
+		maxWordLength: String(DEFAULT_RULES.maxWordLength)
+	});
+	const heistRules = $derived({
+		roundSeconds: Number(heist.roundSeconds),
+		minWordLength: Number(heist.minWordLength),
+		maxCreateLength: Number(heist.maxCreateLength),
+		maxWordLength: Number(heist.maxWordLength)
+	});
+	const range = (lo: number, hi: number) => Array.from({ length: hi - lo + 1 }, (_, i) => lo + i);
+	const heistProblem = $derived(
+		heistRules.maxCreateLength < heistRules.minWordLength
+			? 'The longest new word can’t be shorter than the minimum word length.'
+			: heistRules.maxWordLength <= heistRules.maxCreateLength
+				? 'The longest word must be longer than the longest new word, so steals are possible.'
+				: ''
+	);
 	let creating = $state(false);
 	let createError = $state('');
 
 	const wordCount = $derived(questionMode === 'random' ? QUESTIONS_PER_GAME : fixedQuestions.length);
 	// Only Tech Word Rush has a question set to get right first.
-	const blocked = $derived(!isFlyGame(startFor) && !!questionProblem);
+	const blocked = $derived(startFor === 'word-heist' ? !!heistProblem : !isFlyGame(startFor) && !!questionProblem);
 
 	function openStart(id: string) {
 		startFor = id;
@@ -80,7 +102,7 @@
 
 	async function start() {
 		if (blocked) {
-			createError = questionProblem;
+			createError = startFor === 'word-heist' ? heistProblem : questionProblem;
 			return;
 		}
 		creating = true;
@@ -88,7 +110,10 @@
 		try {
 			const token = await adminAuth.user?.getIdToken();
 			if (!token) throw new Error('Your session expired. Sign in again.');
-			if (isFlyGame(startFor)) {
+			if (startFor === 'word-heist') {
+				const { code } = await createTournament(token, heistRules);
+				await goto(presenterHref('word-heist', code));
+			} else if (isFlyGame(startFor)) {
 				const { code } = await createFlappySession(token, Number(flapDuration), startFor);
 				await goto(presenterHref(startFor, code));
 			} else {
@@ -163,6 +188,19 @@
 						<div>
 							{#if game.poster}
 								<!-- The poster is the art -->
+							{:else if game.id === 'word-heist'}
+								<div class="mb-3 space-y-1" aria-hidden="true">
+									{#each ['CARE', 'CRATER'] as w, row (w)}
+										<div class="flex gap-1">
+											{#each [...w] as ch, i (i)}
+												<span
+													class="grid h-7 w-6 place-items-center rounded border font-display text-sm font-bold transition-colors duration-300
+														{row ? 'border-sun/60 bg-sun/15 text-sun group-hover:border-sun' : 'border-green-300/50 bg-forest-900 text-cream'}">{ch}</span
+												>
+											{/each}
+										</div>
+									{/each}
+								</div>
 							{:else if game.id === 'flappy'}
 								<svg viewBox="0 0 160 70" class="absolute -top-1 right-0 h-28 w-auto" aria-hidden="true">
 									<defs>
@@ -213,7 +251,7 @@
 							<Play class="size-4" /> Start live game
 						</Button>
 						{#if game.manageHref}
-							<Button variant="outline" href={game.manageHref}><ListChecks class="size-4" /> Question bank</Button>
+							<Button variant="outline" href={game.manageHref}><ListChecks class="size-4" /> {game.manageLabel ?? 'Question bank'}</Button>
 						{/if}
 					</div>
 				</div>
@@ -255,7 +293,9 @@
 						<SessionStatusBadge status={s.status} />
 						<span class="inline-flex items-center gap-1 text-xs text-muted-foreground tabular"><Users class="size-3.5" />{s.playerCount}</span>
 						<span class="text-xs text-muted-foreground tabular">
-							{#if s.gameType !== 'tech-word-rush'}
+							{#if s.gameType === 'word-heist'}
+								{s.round === 0 ? 'Registration' : s.final ? 'Final' : `Round ${s.round} · ${s.roomCount} rooms`}
+							{:else if s.gameType !== 'tech-word-rush'}
 								{s.status === 'lobby' ? `${durationLabel(s.duration)} window` : 'Flights live'}
 							{:else}
 								{s.questionIndex < 0 ? 'Not started' : `Word ${s.questionIndex + 1} / ${s.totalQuestions}`}
@@ -321,12 +361,28 @@
 
 <Modal
 	open={startOpen}
-	size={isFlyGame(startFor) ? 'md' : 'lg'}
+	size={isFlyGame(startFor) || startFor === 'word-heist' ? 'md' : 'lg'}
 	title="Start {startFor ? gameName(startFor) : ''}"
 	description="Opens a lobby with a QR code for players to join."
 	onclose={() => !creating && (startFor = null)}
 >
-	{#if isFlyGame(startFor)}
+	{#if startFor === 'word-heist'}
+		<div class="space-y-4">
+			<SelectField label="Round length" bind:value={heist.roundSeconds} options={ROUND_DURATIONS.map((d) => ({ value: String(d), label: durationLabel(d) }))} />
+			<div class="grid gap-3 sm:grid-cols-3">
+				<SelectField label="Shortest word" bind:value={heist.minWordLength} options={range(...RULE_LIMITS.minWordLength).map(String)} />
+				<SelectField label="Longest new word" bind:value={heist.maxCreateLength} options={range(...RULE_LIMITS.maxCreateLength).map(String)} />
+				<SelectField label="Longest word" bind:value={heist.maxWordLength} options={range(...RULE_LIMITS.maxWordLength).map(String)} />
+			</div>
+			<ul class="space-y-1.5 text-[13px] text-muted-foreground">
+				<li>• Everyone scans one QR code. Rooms of about 10 are made when you prepare round 1.</li>
+				<li>• Each player starts with three words (3, 4 and 5 letters). Score = letters in the words you hold.</li>
+				<li>• Top two in every room advance; the round with one room is the final.</li>
+				<li>• Banned words are managed on the Word moderation page.</li>
+			</ul>
+			{#if createError || heistProblem}<p class="text-[13px] text-destructive" role="alert">{createError || heistProblem}</p>{/if}
+		</div>
+	{:else if isFlyGame(startFor)}
 		<div class="space-y-4">
 			<SelectField label="Game length" bind:value={flapDuration} options={FLAP_DURATIONS.map((d) => ({ value: String(d), label: durationLabel(d) }))} />
 			<ul class="space-y-1.5 text-[13px] text-muted-foreground">

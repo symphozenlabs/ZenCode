@@ -4,10 +4,12 @@ import { liveSocketUrl } from './origin';
 
 export type SocketStatus = 'connecting' | 'open' | 'reconnecting' | 'closed';
 
-interface Options {
+interface Options<C, S> {
 	/** Sent on every (re)connect; the server answers with a full snapshot. */
-	hello: () => ClientMessage | null | Promise<ClientMessage | null>;
-	onMessage: (msg: ServerMessage) => void;
+	hello: () => C | null | Promise<C | null>;
+	onMessage: (msg: S) => void;
+	/** Socket URL (default: the live-session hub). */
+	url?: () => string;
 }
 
 /**
@@ -15,16 +17,16 @@ interface Options {
  * at 8s). Reconnects immediately when the device comes back online or the
  * tab becomes visible again — phones suspend sockets aggressively.
  */
-export class LiveSocket {
+export class LiveSocket<C = ClientMessage, S = ServerMessage> {
 	status = $state<SocketStatus>('connecting');
 	#ws: WebSocket | null = null;
 	#attempt = 0;
 	#timer: ReturnType<typeof setTimeout> | null = null;
 	#stopped = false;
 	#hasDropped = false;
-	#opts: Options;
+	#opts: Options<C, S>;
 
-	constructor(opts: Options) {
+	constructor(opts: Options<C, S>) {
 		this.#opts = opts;
 	}
 
@@ -60,7 +62,7 @@ export class LiveSocket {
 		else this.#wake();
 	}
 
-	send(msg: ClientMessage): boolean {
+	send(msg: C): boolean {
 		if (this.#ws?.readyState !== WebSocket.OPEN) return false;
 		this.#ws.send(JSON.stringify(msg));
 		return true;
@@ -82,7 +84,7 @@ export class LiveSocket {
 
 	#connect() {
 		this.#timer = null;
-		const ws = new WebSocket(liveSocketUrl());
+		const ws = new WebSocket((this.#opts.url ?? liveSocketUrl)());
 		this.#ws = ws;
 		this.status = this.#hasDropped ? 'reconnecting' : 'connecting';
 
@@ -93,7 +95,7 @@ export class LiveSocket {
 			this.#sayHello(ws).catch(() => ws.close());
 		};
 		ws.onmessage = (e) => {
-			let msg: ServerMessage;
+			let msg: S;
 			try {
 				msg = JSON.parse(e.data);
 			} catch {

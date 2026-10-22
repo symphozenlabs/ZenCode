@@ -11,8 +11,14 @@ function liveSocket(): Plugin {
 			server.httpServer?.on('upgrade', async (req, socket, head) => {
 				// A client that resets mid-handshake must not crash the dev server.
 				socket.on('error', () => socket.destroy());
-				if ((req.url ?? '').split('?')[0] !== '/live') return; // leave Vite HMR alone
+				const path = (req.url ?? '').split('?')[0];
+				if (path !== '/live' && path !== '/heist') return; // leave Vite HMR alone
 				try {
+					if (path === '/heist') {
+						const mod = await server.ssrLoadModule('/src/lib/server/games/word-heist/hub.ts');
+						mod.heistHub().handleUpgrade(req, socket, head);
+						return;
+					}
 					const mod = await server.ssrLoadModule('/src/lib/server/live/index.ts');
 					mod.liveHub().handleUpgrade(req, socket, head);
 				} catch (err) {

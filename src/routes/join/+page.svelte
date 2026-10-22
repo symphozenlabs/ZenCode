@@ -11,7 +11,8 @@
 	/**
 	 * Fallback for players who can't scan: type the code shown on screen.
 	 * One door for all: a Tech Word Rush game code (ZC7K42), a Flappy Bird or
-	 * Soar & Roar code (ZF7K42 / ZS7K42) or a live session's 6-digit code (482 913).
+	 * Soar & Roar code (ZF7K42 / ZS7K42), a Word Heist code (ZH7K42) or a live
+	 * session's 6-digit code (482 913).
 	 */
 	let code = $state(page.url.searchParams.get('code') ?? '');
 	let error = $state('');
@@ -22,6 +23,7 @@
 		const c = code.trim().toUpperCase().replace(/\s+/g, '');
 		if (/^ZC[A-Z2-9]{4}$/.test(c)) return goto(`/join/${c}`);
 		if (/^Z[FS][A-Z2-9]{4}$/.test(c)) return goto(`/join/flap/${c}`);
+		if (/^ZH[A-Z2-9]{4}$/.test(c)) return goto(`/join/heist/${c}`);
 		if (!JOIN_CODE_RE.test(c)) {
 			error = 'Enter the code shown on the big screen.';
 			return;

@@ -18,6 +18,7 @@
 	import AttendanceQrScanner from '$lib/components/admin/attendance/AttendanceQrScanner.svelte';
 	import TeamAttendancePanel from '$lib/components/admin/attendance/TeamAttendancePanel.svelte';
 	import StudentRecordsTable from '$lib/components/admin/attendance/StudentRecordsTable.svelte';
+	import ManualCheckIn from '$lib/components/admin/attendance/ManualCheckIn.svelte';
 
 	// Real-time subscriptions
 	$effect(() => registrations.subscribe());
@@ -204,6 +205,8 @@
 			onTeamFound={handleTeamFound}
 			onScanError={(err) => (actionError = err)}
 		/>
+
+		<ManualCheckIn />
 
 		<!-- Scanned Team Attendance Panel displayed directly in the Scanner view -->
 		{#if selectedTeamRow}

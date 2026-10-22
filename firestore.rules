@@ -153,6 +153,25 @@ service cloud.firestore {
       match /{private}/{docId} {
         allow read, write: if isAdmin() && private in ['secret', 'playerState', 'names'];
       }
+
+      // Word Heist: room summaries, boards and round results. The live server
+      // holds the real state and pushes it to phones over its WebSocket; these
+      // are its saved copy, read and written only as the organiser.
+      match /rooms/{roomId} {
+        allow read, write: if isAdmin();
+      }
+      match /boards/{roomId} {
+        allow read, write: if isAdmin();
+      }
+      match /rounds/{roundId} {
+        allow read, write: if isAdmin();
+      }
+    }
+
+    // Game settings (Word Heist moderation blocklist). Organisers only; the
+    // server reads it as the organiser account.
+    match /gameConfig/{configId} {
+      allow read, write: if isAdmin();
     }
 
     // Live quiz sessions (/admin/live, /play) are server-only: the Admin SDK

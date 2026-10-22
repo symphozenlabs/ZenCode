@@ -17,6 +17,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "game:bots": "node --env-file-if-exists=.env --experimental-strip-types --no-warnings scripts/game-bots.mjs",
+    "heist:bots": "node --env-file-if-exists=.env --experimental-strip-types --no-warnings scripts/heist-bots.mjs",
     "fly:bots": "node --env-file-if-exists=.env --experimental-strip-types --no-warnings scripts/fly-bots.mjs"
   },
   "devDependencies": {
@@ -45,6 +46,7 @@
     "qrcode-generator": "^2.0.4",
     "resend": "^6.32.1",
     "three": "^0.170.0",
+    "wordlist-english": "^1.2.1",
     "ws": "^8.22.0"
   },
   "overrides": {

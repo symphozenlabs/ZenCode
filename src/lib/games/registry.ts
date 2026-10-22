@@ -10,6 +10,8 @@ export interface GameDefinition {
 	tags: string[];
 	/** Admin page for the game's questions/content, if it has any. */
 	manageHref?: string;
+	/** Button label for manageHref (default "Question bank"). */
+	manageLabel?: string;
 	/** Card art, if any. */
 	poster?: string;
 	/** Big-screen page for a running session. */
@@ -42,6 +44,16 @@ export const GAMES: GameDefinition[] = [
 		tags: ['Ice breaker', 'Mascot', 'Timed'],
 		poster: '/games/symba/poster-sm.webp',
 		presenterHref: (code) => `/admin/games/flappy/live/${code}`
+	},
+	{
+		id: 'word-heist',
+		name: 'Word Heist',
+		tagline: 'Make words. Steal words. Keep the most letters.',
+		description: 'A knockout word-stealing tournament for big crowds. Everyone scans one QR code, rooms of about ten are made automatically, and the top two in each room go through until one room plays the final.',
+		tags: ['Tournament', 'Word stealing', 'Multi-room'],
+		manageHref: '/admin/games/word-heist/moderation',
+		manageLabel: 'Word moderation',
+		presenterHref: (code) => `/admin/games/word-heist/live/${code}`
 	}
 ];
 
