@@ -417,7 +417,7 @@
 					<h2 id="mine-h" class="eyebrow mb-2 text-cream/60">Your words · {myTiles.reduce((n, t) => n + t.text.length, 0)} pts</h2>
 					<ul class="flex flex-wrap gap-2">
 						{#each myTiles as t (t.id)}
-							<li animate:flip={{ duration: 250 }} in:scale={{ start: 0.6, duration: 300 }}>
+							<li in:scale={{ start: 0.6, duration: 200 }}>
 								<button
 									type="button"
 									onclick={() => pick(t)}
@@ -435,7 +435,7 @@
 					<h2 id="room-h" class="eyebrow mb-2 text-cream/60">Room words — tap one to steal it</h2>
 					<ul class="flex flex-wrap gap-2">
 						{#each otherTiles as t (t.id)}
-							<li animate:flip={{ duration: 250 }} in:scale={{ start: 0.6, duration: 300 }}>
+							<li in:scale={{ start: 0.6, duration: 200 }}>
 								<button
 									type="button"
 									onclick={() => pick(t)}
