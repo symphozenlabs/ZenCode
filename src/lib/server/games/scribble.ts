@@ -116,6 +116,10 @@ export async function handle(fn: () => Promise<unknown>) {
 	} catch (err) {
 		if (isHttpError(err)) return json({ message: err.body.message }, { status: err.status });
 		console.error('[scribble]', err);
+		// The game writes under liveSessions/{code}/turns, which older rules don't allow.
+		if ((err as { code?: string })?.code === 'permission-denied') {
+			return json({ message: 'The game’s database rules are out of date. Ask the organiser to deploy firestore.rules.' }, { status: 503 });
+		}
 		return json({ message: 'Something went wrong. Please try again.' }, { status: 500 });
 	}
 }
