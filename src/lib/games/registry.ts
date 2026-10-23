@@ -54,6 +54,14 @@ export const GAMES: GameDefinition[] = [
 		manageHref: '/admin/games/word-heist/moderation',
 		manageLabel: 'Word moderation',
 		presenterHref: (code) => `/admin/games/word-heist/live/${code}`
+	},
+	{
+		id: 'scribble',
+		name: 'Scribble Showdown',
+		tagline: 'One draws. Everyone guesses. Fastest wins.',
+		description: 'Players take turns drawing a secret word on their phone while the room races to guess it. Speed bonuses, streaks and harder words score big — and the big screen ends on a gallery of every drawing.',
+		tags: ['Drawing', 'Party', 'Turn-based'],
+		presenterHref: (code) => `/admin/games/scribble/live/${code}`
 	}
 ];
 
