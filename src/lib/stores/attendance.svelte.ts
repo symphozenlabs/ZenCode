@@ -167,6 +167,27 @@ class AttendanceStore {
 		}
 		return data.results as AttendanceRecord[];
 	}
+
+	/**
+	 * Revokes a false check-in. The server checks `code` against ATTENDANCE_REVOKE_CODE.
+	 */
+	async revokeStudent(teamId: string, participantKey: string, code: string) {
+		const headers = await this.#getAuthHeader();
+		const res = await fetch('/api/admin/attendance/revoke', {
+			method: 'POST',
+			headers,
+			body: JSON.stringify({
+				teamId,
+				participantKey,
+				code
+			})
+		});
+
+		const data = await res.json();
+		if (!res.ok) {
+			throw new Error(data.error || 'Revoke failed');
+		}
+	}
 }
 
 export const attendance = new AttendanceStore();

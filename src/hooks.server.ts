@@ -1,6 +1,7 @@
 import { redirect, type Handle, type ServerInit } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { liveHub } from '$lib/server/live';
+import { heistHub } from '$lib/server/games/word-heist/hub';
 
 // Create the live-session hub at startup so server.js can route WebSocket
 // upgrades to it (it reads globalThis.__zencodeLive).
@@ -11,6 +12,12 @@ export const init: ServerInit = () => {
 		liveHub();
 	} catch (err) {
 		console.error('[live] could not start the live hub', err);
+	}
+	// Word Heist's hub (globalThis.__zencodeHeist) shares the same server.
+	try {
+		heistHub();
+	} catch (err) {
+		console.error('[word-heist] could not start the Word Heist hub', err);
 	}
 };
 

@@ -3,11 +3,11 @@ import { adminDb } from '$lib/server/admin-session';
 import { SESSIONS } from '$lib/games/tech-word-rush/types';
 
 /**
- * Everything a game session keeps under `liveSessions/{code}` (all three
- * games). Firestore never deletes sub-collections with their parent, so each
- * is cleared by name.
+ * Everything a game session keeps under `liveSessions/{code}` (every game;
+ * rooms, boards and rounds are Word Heist's). Firestore never deletes
+ * sub-collections with their parent, so each is cleared by name.
  */
-const SUBCOLLECTIONS = ['players', 'playerState', 'names', 'secret'] as const;
+const SUBCOLLECTIONS = ['players', 'playerState', 'names', 'secret', 'rooms', 'boards', 'rounds'] as const;
 const BATCH = 450; // under Firestore's 500 writes per batch
 
 async function deleteSession(db: Firestore, code: string) {

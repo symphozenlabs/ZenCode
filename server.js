@@ -10,15 +10,17 @@ const server = createServer(handler);
 
 server.on('upgrade', (req, socket, head) => {
 	socket.on('error', () => socket.destroy());
-	const hub = globalThis.__zencodeLive;
-	if (!hub?.handleUpgrade(req, socket, head)) socket.destroy();
+	// /live → live sessions, /heist → Word Heist.
+	const handled = globalThis.__zencodeLive?.handleUpgrade(req, socket, head) || globalThis.__zencodeHeist?.handleUpgrade(req, socket, head);
+	if (!handled) socket.destroy();
 });
 
 server.listen(port, host, () => console.log(`ZenCode listening on http://${host}:${port}`));
 
 const shutdown = () => {
 	globalThis.__zencodeLive?.close();
-	server.close(() => process.exit(0));
+	// Word Heist saves its tournaments to Firestore before closing.
+	Promise.resolve(globalThis.__zencodeHeist?.close()).finally(() => server.close(() => process.exit(0)));
 	setTimeout(() => process.exit(0), 5000).unref();
 };
 process.on('SIGTERM', shutdown);

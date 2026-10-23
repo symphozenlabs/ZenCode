@@ -7,9 +7,9 @@
 // 2. Run this with the code. Bots join the lobby.
 // 3. Start the game from the presenter. Each bot flies again and again until
 //    time is up: start a flight, fly 2–10 s, land with a score the server's
-//    speed cap allows. Only the latest flight counts, like real players.
+//    speed cap allows. Only the best flight counts, like real players.
 // 4. When the game finishes, the script checks that every bot's leaderboard
-//    score is its latest saved flight and its flight count matches, then each
+//    score is its best saved flight and its flight count matches, then each
 //    bot taps "Back to ZenCode" (the registration page) and leaves.
 
 import { initializeApp } from 'firebase/app';
@@ -100,7 +100,7 @@ const bots = Array.from({ length: BOTS }, (_, i) => ({
 	name: `Bot ${NAMES[i % NAMES.length]} ${i + 1}`,
 	id: null,
 	flights: 0, // flights the server accepted a start for (= its `rounds`)
-	latest: 0, // score of the latest saved flight (what the leaderboard must show)
+	best: 0, // best saved flight (what the leaderboard must show)
 	firstFlightAt: null
 }));
 
@@ -140,8 +140,8 @@ async function fly(bot, endsAt, t0) {
 		stats.started++;
 		bot.firstFlightAt ??= Date.now() - t0;
 		const startedAt = Date.now();
-		// Land before the server's 4 s landing allowance after time-up runs out.
-		await wait(Math.max(500, Math.min(rand(2000, 10000), endsAt + 2500 - serverNow())));
+		// Land by time-up: the server's 4 s allowance after it is for the reply's trip, not for flying on.
+		await wait(Math.max(500, Math.min(rand(2000, 10000), endsAt - serverNow())));
 		// A believable score: at most what the bird could reach in that time.
 		const flownMs = Date.now() - startedAt;
 		const score = Math.floor(maxScore(flownMs) * (0.3 + Math.random() * 0.7));
@@ -152,7 +152,7 @@ async function fly(bot, endsAt, t0) {
 			problem(`${bot.name}: landing refused: "${end.rejected}"`);
 		} else {
 			if (end.saved !== score) problem(`${bot.name}: sent ${score}, server saved ${end.saved}`);
-			bot.latest = end.saved;
+			bot.best = Math.max(bot.best, end.saved);
 			stats.saved++;
 		}
 		await wait(rand(300, 1500)); // "fly again"
@@ -206,7 +206,7 @@ async function finish(s) {
 	for (const b of live) {
 		const e = board.get(b.id.playerId);
 		if (!e) continue;
-		if (e.score !== b.latest) problem(`${b.name}: leaderboard shows ${e.score}, latest flight was ${b.latest}`);
+		if (e.score !== b.best) problem(`${b.name}: leaderboard shows ${e.score}, best flight was ${b.best}`);
 		if (e.rounds !== b.flights) problem(`${b.name}: leaderboard shows ${e.rounds} flights, bot flew ${b.flights}`);
 	}
 	for (let i = 1; i < s.leaderboard.length; i++) {
@@ -243,7 +243,7 @@ async function finish(s) {
   Top 3
 ${s.leaderboard.slice(0, 3).map((e) => `     #${e.rank}  ${e.name.padEnd(20)} ${e.score} (${e.rounds} flights)`).join('\n') || '     (empty)'}
 
-  ${problems.length ? `❌ ${problems.length} problem(s) found${problems.length > 15 ? ' (first 15 shown above)' : ''}` : '✅ Everything matched: latest scores, flight counts, ranking and winner.'}
+  ${problems.length ? `❌ ${problems.length} problem(s) found${problems.length > 15 ? ' (first 15 shown above)' : ''}` : '✅ Everything matched: best scores, flight counts, ranking and winner.'}
 `);
 	await terminate(db);
 	process.exit(problems.length ? 1 : 0);
