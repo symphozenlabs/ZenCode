@@ -46,6 +46,7 @@ import {
 	DRAW_SECONDS,
 	GAME_TYPE,
 	IDLE_MS,
+	OFFLINE_MS,
 	REVEAL_MS,
 	TURN_COUNTS,
 	type DrawAction,
@@ -87,6 +88,8 @@ const guessesCol = (db: Firestore, code: string, turn: number) => collection(db,
 
 interface PrivateState {
 	tokenHash: string;
+	/** Last heartbeat from the player's phone (see sweepOffline). */
+	lastSeen?: number;
 	/** The last turn this player guessed right. */
 	guessedTurn?: number;
 	lastGuessAt?: number;
@@ -230,6 +233,8 @@ export async function createSession(createdBy: string, body: Record<string, unkn
 
 /** Hand the pencil to the next artist, or end the game when every turn has been drawn. */
 async function beginTurn(db: Firestore, code: string, expect: { status: DrawStatus; turn: number }) {
+	// Never hand the pencil to someone who has left.
+	await sweepOffline(db, code, { force: true }).catch((err) => console.error('[scribble] sweep', err));
 	const [players, s] = await Promise.all([listPlayers(db, code), getDoc(sessionRef(db, code)).then(sessionData)]);
 	if (s.status !== expect.status || s.turn !== expect.turn) return; // someone else moved it on
 	const fromLobby = s.status === 'lobby';
@@ -294,8 +299,12 @@ const advancing = new Map<string, Promise<void>>();
  * out, a hint letter is due, the turn is over, or the reveal is done. Safe to
  * call any number of times — anything not yet due is left alone.
  */
-function advance(db: Firestore, code: string, opts: { skip?: boolean; finish?: boolean; allGuessed?: number } = {}): Promise<void> {
-	const forced = opts.skip || opts.finish || opts.allGuessed !== undefined;
+function advance(
+	db: Firestore,
+	code: string,
+	opts: { skip?: boolean; finish?: boolean; allGuessed?: number; offline?: boolean } = {}
+): Promise<void> {
+	const forced = opts.skip || opts.finish || opts.offline || opts.allGuessed !== undefined;
 	const running = advancing.get(code);
 	if (running && !forced) return running;
 	const run = (async () => {
@@ -320,7 +329,7 @@ function advance(db: Firestore, code: string, opts: { skip?: boolean; finish?: b
 
 			if (s.status === 'choosing') {
 				if (opts.finish) return { kind: 'finish' };
-				if (!opts.skip && now < (s.phaseEndsAt ?? 0)) return NONE;
+				if (!opts.skip && !opts.offline && now < (s.phaseEndsAt ?? 0)) return NONE;
 				tx.update(ref, {
 					status: 'reveal',
 					mask: null,
@@ -332,7 +341,7 @@ function advance(db: Firestore, code: string, opts: { skip?: boolean; finish?: b
 						drawerId: s.drawerId ?? '',
 						drawerName: s.drawerName ?? '',
 						difficulty: null,
-						reason: opts.skip ? 'host' : 'away',
+						reason: opts.skip ? 'host' : opts.offline ? 'offline' : 'away',
 						guessed: 0,
 						eligible: 0,
 						drawerPoints: 0,
@@ -351,7 +360,17 @@ function advance(db: Firestore, code: string, opts: { skip?: boolean; finish?: b
 				const ends = s.phaseEndsAt ?? now;
 				const idle = !s.inked && now >= Math.min(started + IDLE_MS, ends);
 				const reason: EndReason | null =
-					opts.finish || opts.skip ? 'host' : opts.allGuessed === s.turn ? 'all' : idle ? 'idle' : now >= ends ? 'time' : null;
+					opts.finish || opts.skip
+						? 'host'
+						: opts.offline
+							? 'offline'
+							: opts.allGuessed === s.turn
+								? 'all'
+								: idle
+									? 'idle'
+									: now >= ends
+										? 'time'
+										: null;
 				if (reason) {
 					tx.update(ref, {
 						status: opts.finish ? 'finished' : 'reveal',
@@ -439,7 +458,7 @@ async function scoreTurn(db: Firestore, code: string, turn: number) {
 	const difficulty = s.reveal.difficulty ?? 'easy';
 	const eligible = Math.max(order.length, s.eligible, 1);
 	const masterpiece = isMasterpiece(order.length, eligible);
-	const drawn = s.reveal.reason !== 'idle';
+	const drawn = s.reveal.reason !== 'idle' && s.reveal.reason !== 'offline';
 	const dPts = drawn ? drawerPoints(order.length, eligible, difficulty) + (masterpiece ? MASTERPIECE_BONUS : 0) : 0;
 	const gains = order.map((g, i) => {
 		const bonus = ORDER_BONUS[i] ?? 0;
@@ -514,6 +533,7 @@ async function restart(db: Firestore, code: string) {
 			leaderboard: [],
 			winner: null,
 			scoring: false,
+			kicked: null,
 			resets: increment(1)
 		});
 	});
@@ -528,7 +548,7 @@ async function restart(db: Firestore, code: string) {
 }
 
 export async function control(code: string, action: DrawControl): Promise<{ now: number }> {
-	if (!['sync', 'start', 'advance', 'skip', 'finish', 'restart'].includes(action)) error(400, 'Unknown action.');
+	if (!['sync', 'start', 'advance', 'skip', 'finish', 'restart', 'sweep'].includes(action)) error(400, 'Unknown action.');
 	const db = await adminDb();
 	if (action === 'sync') {
 		sessionData(await getDoc(sessionRef(db, code)));
@@ -537,6 +557,8 @@ export async function control(code: string, action: DrawControl): Promise<{ now:
 		if (s.status === 'lobby') await beginTurn(db, code, { status: 'lobby', turn: s.turn });
 	} else if (action === 'restart') {
 		await restart(db, code);
+	} else if (action === 'sweep') {
+		await sweepOffline(db, code);
 	} else {
 		await advance(db, code, { skip: action === 'skip', finish: action === 'finish' });
 	}
@@ -572,7 +594,7 @@ export async function join(code: string, rawName: unknown) {
 	await withLock(`${code}/name/${nameRef.id}`, async () => {
 		if ((await getDoc(nameRef)).exists()) error(409, 'That name is already taken in this game. Try another.');
 		const player: DrawPlayer = { name, joinedAt: Date.now(), score: 0, streak: 0, guessed: 0, drew: 0 };
-		const state: PrivateState = { tokenHash: sha256(token) };
+		const state: PrivateState = { tokenHash: sha256(token), lastSeen: Date.now() };
 		const w = await writerDb();
 		const batch = writeBatch(w);
 		batch.set(doc(w, nameRef.path), { playerId: id });
@@ -632,10 +654,11 @@ function readIdentity(body: Record<string, unknown>) {
 export async function play(code: string, body: Record<string, unknown>): Promise<DrawView | { now: number; closed?: boolean }> {
 	const { playerId, token } = readIdentity(body);
 	const action = body.action as DrawAction;
-	if (!['state', 'choose', 'draw', 'guess', 'advance'].includes(action)) error(400, 'Unknown action.');
+	if (!['state', 'choose', 'draw', 'guess', 'advance', 'ping'].includes(action)) error(400, 'Unknown action.');
 	const db = await adminDb();
 
 	if (action === 'draw') return draw(db, code, playerId, token, body);
+	if (action === 'ping') return ping(db, code, playerId, token);
 
 	if (action === 'advance') {
 		await checkToken(db, code, playerId, token);
@@ -761,4 +784,92 @@ async function draw(db: Firestore, code: string, playerId: string, token: string
 	if (!s.inked && s.status === 'drawing') writes.push(updateDoc(sessionRef(w, code), { inked: true }));
 	await Promise.all(writes);
 	return { now: Date.now() };
+}
+
+// ── Presence ─────────────────────────────────────────────────────────────
+
+/**
+ * The phone's heartbeat. It only touches the player's private state doc, so
+ * a room full of phones never wakes the session doc everyone listens to.
+ */
+async function ping(db: Firestore, code: string, playerId: string, token: string) {
+	await checkToken(db, code, playerId, token);
+	const w = await writerDb();
+	try {
+		await updateDoc(stateRef(w, code, playerId), { lastSeen: Date.now() });
+	} catch (err) {
+		// Removed for going offline while this phone was asleep.
+		if ((err as { code?: string })?.code === 'not-found') error(401, 'You were removed from the game. Join again.');
+		throw err;
+	}
+	return { now: Date.now() };
+}
+
+/** Sessions swept recently in this instance; the big screen asks every 20 seconds. */
+const lastSweep = new Map<string, number>();
+const SWEEP_GAP_MS = 10_000;
+
+/**
+ * Remove players whose phone hasn't checked in for OFFLINE_MS: their player
+ * doc, name and device token go, so they drop off the board and the next
+ * artist is picked from people still here (and can rejoin with the same
+ * name). If the artist was one of them the turn ends now; if everyone left
+ * has already guessed, so does that.
+ */
+async function sweepOffline(db: Firestore, code: string, opts: { force?: boolean } = {}) {
+	const now = Date.now();
+	if (!opts.force && now - (lastSweep.get(code) ?? 0) < SWEEP_GAP_MS) return;
+	lastSweep.set(code, now);
+	if (lastSweep.size > 500) lastSweep.clear();
+
+	const [s, states, players] = await Promise.all([
+		getDoc(sessionRef(db, code)).then(sessionData),
+		getDocs(collection(db, SESSIONS, code, 'playerState')),
+		listPlayers(db, code)
+	]);
+	// Not while points are being added: those writes expect every player doc to exist.
+	if (s.status === 'finished' || s.scoring) return;
+	const gone = new Set(
+		states.docs
+			.filter((d) => {
+				const seen = (d.data() as PrivateState).lastSeen;
+				return typeof seen === 'number' && now - seen > OFFLINE_MS;
+			})
+			.map((d) => d.id)
+	);
+	if (!gone.size) return;
+
+	const byId = new Map(players.map((p) => [p.id, p]));
+	const ids = [...gone];
+	const w = await writerDb();
+	for (let i = 0; i < ids.length; i += 150) {
+		// Three deletes each, under Firestore's 500 writes per batch.
+		const batch = writeBatch(w);
+		for (const id of ids.slice(i, i + 150)) {
+			batch.delete(stateRef(w, code, id));
+			batch.delete(playerRef(w, code, id));
+			const p = byId.get(id);
+			if (p) batch.delete(doc(w, SESSIONS, code, 'names', sha256(p.name.toLowerCase())));
+		}
+		await batch.commit();
+	}
+	for (const key of trusted) if (gone.has(key.split('/')[1])) trusted.delete(key);
+
+	const names = ids.flatMap((id) => (byId.has(id) ? [byId.get(id)!.name] : []));
+	const left = players.filter((p) => !gone.has(p.id)).length;
+	const drawing = s.status === 'drawing';
+	const eligible = Math.max(1, left - 1);
+	await updateDoc(sessionRef(w, code), {
+		playerCount: left,
+		...(names.length ? { kicked: { names: names.slice(0, 20), count: names.length, at: now } } : {}),
+		...(drawing ? { eligible } : {})
+	});
+
+	const artistLeft = !!s.drawerId && gone.has(s.drawerId) && (s.status === 'choosing' || drawing);
+	if (artistLeft) {
+		await advance(db, code, { offline: true });
+	} else if (drawing) {
+		const got = (await getCountFromServer(query(guessesCol(db, code, s.turn), where('ok', '==', true)))).data().count;
+		if (got >= eligible) await advance(db, code, { allGuessed: s.turn });
+	}
 }

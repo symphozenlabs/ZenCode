@@ -4,7 +4,7 @@
 	import { flip } from 'svelte/animate';
 	import { fade, fly, scale } from 'svelte/transition';
 	import { backOut } from 'svelte/easing';
-	import { Users, X, Maximize, Minimize, Play, Flag, CloudOff, ArrowLeft, RotateCcw, SkipForward, Brush, Sparkles, Flame, Check, Images } from '@lucide/svelte';
+	import { Users, X, Maximize, Minimize, Play, Flag, CloudOff, ArrowLeft, RotateCcw, SkipForward, Brush, Sparkles, Flame, Check, Images, WifiOff } from '@lucide/svelte';
 	import { db } from '$lib/firebase/client';
 	import { adminAuth } from '$lib/stores/admin-auth.svelte';
 	import { serverNow } from '$lib/games/tech-word-rush/api';
@@ -17,6 +17,7 @@
 	import ScribbleCanvas from '$lib/components/games/scribble/ScribbleCanvas.svelte';
 	import CanvasFrame from '$lib/components/games/scribble/CanvasFrame.svelte';
 	import WordMask from '$lib/components/games/scribble/WordMask.svelte';
+	import LivingDrawing from '$lib/components/games/scribble/LivingDrawing.svelte';
 	import Countdown from '$lib/components/games/Countdown.svelte';
 	import Logo from '$lib/components/site/Logo.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -123,6 +124,31 @@
 			.finally(() => (ticking = false));
 	});
 
+	// Players whose phone has gone quiet are removed; this screen asks the
+	// server to check every 20 seconds (each new turn checks too).
+	$effect(() => {
+		if (status === 'finished' || loadState !== 'ready') return;
+		const sweep = () => adminAuth.user?.getIdToken().then((t) => control(t, code, 'sweep')).catch(() => {});
+		const timer = setInterval(sweep, 20_000);
+		return () => clearInterval(timer);
+	});
+
+	// Announce who left.
+	let leftNotice = $state<{ text: string; at: number } | null>(null);
+	let seenKick: number | null = null;
+	$effect(() => {
+		const k = session?.kicked;
+		if (!k) return;
+		if (seenKick !== null && k.at !== seenKick) {
+			const shown = k.names.slice(0, 3).join(', ');
+			const more = k.count - Math.min(3, k.names.length);
+			leftNotice = { text: `${shown}${more > 0 ? ` and ${more} more` : ''} went offline and left the game`, at: k.at };
+			const at = k.at;
+			setTimeout(() => leftNotice?.at === at && (leftNotice = null), 5000);
+		}
+		seenKick = k.at;
+	});
+
 	// ── Final gallery ────────────────────────────────────────────────────
 	let gallery = $state<{ turn: TurnDoc; chunks: Chunk[] }[] | null>(null);
 	$effect(() => {
@@ -163,7 +189,8 @@
 		all: 'Everyone got it!',
 		idle: 'Nothing was drawn',
 		host: 'Turn skipped',
-		away: 'The artist is away'
+		away: 'The artist is away',
+		offline: 'The artist went offline'
 	};
 </script>
 
@@ -353,7 +380,7 @@
 										{#if reveal.word}
 											<p class="mt-2 text-xl text-cream/70">The word was</p>
 											<div class="mt-2" in:scale={{ start: 0.6, duration: 600, easing: backOut }}><WordMask mask={reveal.word} size="xl" solved /></div>
-											<div class="mx-auto mt-6 w-full max-w-xl"><CanvasFrame fluid><ScribbleCanvas {chunks} animate={false} label="The drawing" /></CanvasFrame></div>
+											<LivingDrawing {chunks} word={reveal.word} ready={!session.scoring} class="mx-auto mt-6 w-full max-w-xl" />
 											{#if session.scoring}
 												<p class="mt-5 flex items-center justify-center gap-2 text-cream/70"><Spinner class="size-4" /> Adding up points…</p>
 											{:else}
@@ -366,7 +393,9 @@
 											{/if}
 										{:else}
 											<p class="mt-6 font-display text-5xl font-bold">{reveal.drawerName}</p>
-											<p class="mt-2 text-xl text-cream/70">{reveal.reason === 'host' ? 'Turn skipped.' : 'didn’t pick a word in time.'} Next artist coming up…</p>
+											<p class="mt-2 text-xl text-cream/70">
+												{reveal.reason === 'host' ? 'Turn skipped.' : reveal.reason === 'offline' ? 'went offline.' : 'didn’t pick a word in time.'} Next artist coming up…
+											</p>
 										{/if}
 									{/if}
 								</div>
@@ -457,6 +486,14 @@
 			</div>
 		{/if}
 	</main>
+
+	{#if leftNotice}
+		<div class="pointer-events-none fixed inset-x-0 top-20 z-30 flex justify-center px-4" role="status" in:fly={{ y: -16, duration: 300 }} out:fade>
+			<p class="inline-flex items-center gap-2 rounded-full border border-attention/40 bg-stage/90 px-4 py-2 text-sm font-semibold shadow-lg backdrop-blur">
+				<WifiOff class="size-4 text-attention" />{leftNotice.text}
+			</p>
+		</div>
+	{/if}
 
 	<!-- Controls -->
 	{#if session && loadState === 'ready'}

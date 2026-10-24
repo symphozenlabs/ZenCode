@@ -8,14 +8,15 @@
 	import { db } from '$lib/firebase/client';
 	import { SESSIONS } from '$lib/games/tech-word-rush/types';
 	import { serverNow } from '$lib/games/tech-word-rush/api';
-	import { CODE_RE, GAME_TYPE, asRankEntries, type DrawPlayer, type DrawSession, type DrawView, type Op } from '$lib/games/scribble/types';
-	import { forgetIdentity, join, loadIdentity, play, sendStrokes, type Identity } from '$lib/games/scribble/api';
+	import { CODE_RE, GAME_TYPE, HEARTBEAT_MS, asRankEntries, type DrawPlayer, type DrawSession, type DrawView, type Op } from '$lib/games/scribble/types';
+	import { forgetIdentity, join, loadIdentity, ping, play, sendStrokes, type Identity } from '$lib/games/scribble/api';
 	import { MULTIPLIER, dueAt, streakMultiplier } from '$lib/games/scribble/engine';
 	import { listenGuesses, listenStrokes, type Chunk, type Guess } from '$lib/games/scribble/live';
 	import ScribbleCanvas, { type Tool } from '$lib/components/games/scribble/ScribbleCanvas.svelte';
 	import CanvasFrame from '$lib/components/games/scribble/CanvasFrame.svelte';
 	import DrawTools from '$lib/components/games/scribble/DrawTools.svelte';
 	import WordMask from '$lib/components/games/scribble/WordMask.svelte';
+	import LivingDrawing from '$lib/components/games/scribble/LivingDrawing.svelte';
 	import Leaderboard from '$lib/components/games/Leaderboard.svelte';
 	import XpCounter from '$lib/components/games/XpCounter.svelte';
 	import Confetti from '$lib/components/live/Confetti.svelte';
@@ -102,6 +103,7 @@
 		joinError = '';
 		try {
 			identity = await join(code, name);
+			kicked = false;
 		} catch (err) {
 			joinError = (err as Error).message || 'Unable to join the game.';
 		} finally {
@@ -109,12 +111,48 @@
 		}
 	}
 
-	// My own player doc: score and streak, live.
+	// My own player doc: score and streak, live. If it disappears, this
+	// player was removed for going offline.
 	let me = $state<DrawPlayer | null>(null);
+	let kicked = $state(false);
 	$effect(() => {
 		const id = identity?.playerId;
 		if (!id) return;
-		return onSnapshot(doc(db(), SESSIONS, code, 'players', id), (snap) => (me = (snap.data() as DrawPlayer | undefined) ?? null));
+		let seen = false;
+		return onSnapshot(doc(db(), SESSIONS, code, 'players', id), (snap) => {
+			if (snap.exists()) {
+				seen = true;
+				me = snap.data() as DrawPlayer;
+			} else if (seen) removed();
+		});
+	});
+
+	function removed() {
+		forgetIdentity(code);
+		if (identity) name = identity.name;
+		identity = null;
+		view = null;
+		me = null;
+		kicked = true;
+	}
+
+	// Heartbeat while the page is open and on screen; a phone that sleeps or
+	// leaves stops checking in and is removed after a minute.
+	const playing = $derived(!!identity && status !== 'finished');
+	$effect(() => {
+		if (!playing) return;
+		const id = identity!;
+		const beat = () => {
+			if (document.visibilityState !== 'visible') return;
+			ping(code, id).catch((err) => err.status === 401 && identity === id && removed());
+		};
+		beat();
+		const timer = setInterval(beat, HEARTBEAT_MS);
+		document.addEventListener('visibilitychange', beat);
+		return () => {
+			clearInterval(timer);
+			document.removeEventListener('visibilitychange', beat);
+		};
 	});
 
 	const myId = $derived(identity?.playerId ?? null);
@@ -258,7 +296,8 @@
 		all: 'Everyone got it!',
 		idle: 'The artist didn’t draw anything.',
 		host: 'The host skipped this turn.',
-		away: 'The artist seems to be away.'
+		away: 'The artist seems to be away.',
+		offline: 'The artist went offline.'
 	};
 	const board = $derived(session ? asRankEntries(session.leaderboard) : []);
 	const tag = (d: string) => (d === 'easy' ? 'Easy' : d === 'medium' ? 'Medium' : 'Hard');
@@ -349,6 +388,11 @@
 					<li class="flex gap-2"><Sparkles class="mt-0.5 size-4 shrink-0 text-sun" /> Guess what others draw — faster pays more.</li>
 					<li class="flex gap-2"><Flame class="mt-0.5 size-4 shrink-0 text-sun" /> Guess in a row to build a streak bonus.</li>
 				</ul>
+				{#if kicked}
+					<p class="mt-5 rounded-xl border border-attention/40 bg-attention/10 px-4 py-3 text-sm text-cream/90" role="alert">
+						You went offline, so you were removed from the game. Join again to keep playing — your score starts from zero.
+					</p>
+				{/if}
 				<form class="mt-6 space-y-3" onsubmit={submitJoin} novalidate>
 					<label for="name" class="eyebrow block text-cream/60">Your name</label>
 					<input
@@ -566,12 +610,10 @@
 							{#if reveal.word}
 								<p class="mt-1 text-center text-sm text-cream/60">The word was</p>
 								<div class="mt-1" in:scale={{ start: 0.7, duration: 500, easing: backOut }}><WordMask mask={reveal.word} size="lg" solved /></div>
-								<div class="mx-auto mt-4 w-full max-w-xs">
-									<CanvasFrame fluid><ScribbleCanvas {chunks} animate={false} label="The drawing" /></CanvasFrame>
-								</div>
+								<LivingDrawing {chunks} word={reveal.word} ready={!session.scoring} class="mx-auto mt-4 w-full max-w-xs" />
 							{:else}
 								<p class="mt-4 text-center font-display text-3xl font-bold">{reveal.drawerName}</p>
-								<p class="text-center text-cream/60">missed their turn. Next artist coming up…</p>
+								<p class="text-center text-cream/60">{reveal.reason === 'offline' ? 'went offline.' : 'missed their turn.'} Next artist coming up…</p>
 							{/if}
 
 							{#if reveal.word}

@@ -18,6 +18,7 @@ import {
 import { sanitizeOps } from './board';
 import { IDLE_MS } from './types';
 import { buildPool, cleanWord, parseCustomWords } from './words';
+import { motionFor, timeline } from './life';
 
 const seq = (...values: number[]) => {
 	let i = 0;
@@ -195,5 +196,38 @@ describe('sanitizeOps', () => {
 		expect(sanitizeOps([{ t: 's', i: 1, c: 0, w: 0, p: [1] }])).toBeNull();
 		expect(sanitizeOps([{ t: 'x' }])).toBeNull();
 		expect(sanitizeOps([{ t: 's', i: 1, c: 0, w: 0, p: Array(2402).fill(1) }])).toBeNull();
+	});
+});
+
+describe('drawings come to life', () => {
+	it('moves each drawing the way its word would', () => {
+		expect(motionFor('rocket')).toBe('launch');
+		expect(motionFor('Hot Air Balloon')).toBe('float');
+		expect(motionFor('auto rickshaw')).toBe('drive');
+		expect(motionFor('cricket bat')).toBe('bounce'); // not a bat that flies off
+		expect(motionFor('rubber duck debugging')).toBe('swim');
+		expect(motionFor('sun')).toBe('spin');
+		expect(motionFor('fireflies')).toBe('dance');
+	});
+
+	it('starts and lands exactly where it was drawn', () => {
+		const space = { left: 500, right: 500, top: 300, bottom: 300, width: 200, height: 150 };
+		for (const motion of ['launch', 'fly', 'swim', 'drive', 'bounce', 'float', 'spin', 'shake', 'dance'] as const) {
+			const { keyframes } = timeline(motion, space);
+			const first = keyframes[0];
+			const last = keyframes[keyframes.length - 1];
+			expect(first.offset).toBe(0);
+			expect(last.offset).toBe(1);
+			expect(first.transform).toBe('translate(0.0px, 0.0px) rotate(0.0deg) scale(1.000, 1.000)');
+			expect(last.transform).toMatch(/^translate\(0\.0px, 0\.0px\) rotate\(-?\d+(\.0)?deg\) scale\(1\.000, 1\.000\)$/);
+			expect(Number.parseFloat(String(last.transform).split('rotate(')[1]) % 360).toBe(0);
+			const offsets = keyframes.map((k) => k.offset as number);
+			expect([...offsets].sort((a, b) => a - b)).toEqual(offsets);
+		}
+	});
+
+	it('jumps from edge to edge out of sight', () => {
+		const { keyframes } = timeline('drive', { left: 500, right: 500, top: 300, bottom: 300, width: 200, height: 150 });
+		expect(keyframes.some((k) => k.opacity === 0)).toBe(true);
 	});
 });

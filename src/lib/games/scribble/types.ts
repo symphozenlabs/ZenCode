@@ -37,10 +37,17 @@ export const AWAY_MS = 4_000;
 export const IDLE_MS = 25_000;
 /** The artist's phone sends what it drew this often. */
 export const FLUSH_MS = 250;
+/** Every phone in the game says "still here" this often while it is open. */
+export const HEARTBEAT_MS = 15_000;
+/** No word from a phone for this long: the player has gone and is removed from the game. */
+export const OFFLINE_MS = 60_000;
 
 export type DrawStatus = 'lobby' | 'choosing' | 'drawing' | 'reveal' | 'finished';
-/** time = the clock ran out · all = everyone guessed · idle = nothing drawn · host = skipped · away = no word picked */
-export type EndReason = 'time' | 'all' | 'idle' | 'host' | 'away';
+/**
+ * time = the clock ran out · all = everyone guessed · idle = nothing drawn ·
+ * host = skipped · away = no word picked · offline = the artist went offline
+ */
+export type EndReason = 'time' | 'all' | 'idle' | 'host' | 'away' | 'offline';
 
 export interface DrawRankEntry {
 	id: string;
@@ -108,6 +115,8 @@ export interface DrawSession {
 	scoringAt?: number;
 	/** How many times the host restarted this code. */
 	resets?: number;
+	/** The last players removed for going offline (the big screen announces them). */
+	kicked?: { names: string[]; count: number; at: number } | null;
 }
 
 export interface DrawPlayer {
@@ -202,8 +211,10 @@ export interface DrawView {
 	rejected?: string;
 }
 
-export type DrawControl = 'sync' | 'start' | 'advance' | 'skip' | 'finish' | 'restart';
-export type DrawAction = 'state' | 'choose' | 'draw' | 'guess' | 'advance';
+/** `sweep` removes players who have gone offline. */
+export type DrawControl = 'sync' | 'start' | 'advance' | 'skip' | 'finish' | 'restart' | 'sweep';
+/** `ping` is the phone's heartbeat. */
+export type DrawAction = 'state' | 'choose' | 'draw' | 'guess' | 'advance' | 'ping';
 
 export const drawDurationLabel = (seconds: number) => `${seconds} sec`;
 

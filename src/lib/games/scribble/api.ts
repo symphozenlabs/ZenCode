@@ -81,6 +81,10 @@ export async function join(code: string, name: string): Promise<Identity> {
 export const play = (code: string, id: Identity, action: DrawAction, extra: { turn?: number; index?: number; text?: string } = {}) =>
 	post<DrawView>(`${BASE}/${code}/play`, { playerId: id.playerId, token: id.token, action, ...extra });
 
+/** Heartbeat: "this phone is still here". A 401 means the player was removed for going offline. */
+export const ping = (code: string, id: Identity) =>
+	post<{ now: number }>(`${BASE}/${code}/play`, { playerId: id.playerId, token: id.token, action: 'ping' });
+
 /** The artist's strokes. `closed`: the turn is over, stop sending. Failures throw. */
 export const sendStrokes = (code: string, id: Identity, turn: number, seq: number, ops: Op[]) =>
 	post<{ now: number; closed?: boolean }>(`${BASE}/${code}/play`, { playerId: id.playerId, token: id.token, action: 'draw', turn, seq, ops });
