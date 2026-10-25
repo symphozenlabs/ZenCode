@@ -1,7 +1,7 @@
 import { LiveSocket } from '$lib/live/socket.svelte';
 import { heistSocketUrl } from '$lib/live/origin';
 import { syncClock } from '$lib/games/tech-word-rush/api';
-import type { AdminPlayer, BoardView, HeistClientMessage, HeistServerMessage, MeView, MoveKind, TournamentView } from './protocol';
+import type { AdminPlayer, BoardView, HeistClientMessage, HeistServerMessage, MeView, TournamentView } from './protocol';
 import type { HeistControl, MoveResult, RoomSummary, RoundResult } from './types';
 import { forgetIdentity, loadIdentity, newRequestId, saveIdentity, type Identity } from './api';
 
@@ -133,7 +133,7 @@ export class HeistClient {
 		}
 	}
 
-	join(name: string): Promise<void> {
+	join(name: string, avatar?: number): Promise<void> {
 		if (this.#joining) return Promise.reject(new Error('Already joining…'));
 		return new Promise((resolve, reject) => {
 			const timer = setTimeout(() => {
@@ -144,7 +144,7 @@ export class HeistClient {
 				resolve: () => (clearTimeout(timer), resolve()),
 				reject: (e) => (clearTimeout(timer), reject(e))
 			};
-			if (!this.socket.send({ t: 'join', code: this.code, name })) {
+			if (!this.socket.send({ t: 'join', code: this.code, name, avatar })) {
 				clearTimeout(timer);
 				this.#joining = null;
 				reject(new Error('Connecting… try again in a moment.'));
@@ -152,10 +152,10 @@ export class HeistClient {
 		});
 	}
 
-	/** Make or steal a word. Resolves with the server's verdict (usually in well under a second). */
-	move(kind: MoveKind, text: string, sourceId?: string): Promise<MoveResult> {
+	/** Play a word (made from tiles, or a steal). Resolves with the server's verdict (usually in well under a second). */
+	move(text: string): Promise<MoveResult> {
 		const requestId = newRequestId();
-		const msg: HeistClientMessage = { t: 'move', requestId, kind, text, ...(sourceId ? { sourceId } : {}) };
+		const msg: HeistClientMessage = { t: 'move', requestId, text };
 		return new Promise((resolve) => {
 			const timer = setTimeout(() => {
 				this.#pendingMoves.delete(requestId);

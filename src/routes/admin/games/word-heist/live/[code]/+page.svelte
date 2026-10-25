@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { flip } from 'svelte/animate';
 	import {
@@ -24,7 +25,7 @@
 	import { adminAuth } from '$lib/stores/admin-auth.svelte';
 	import { serverNow } from '$lib/games/tech-word-rush/api';
 	import { HeistClient } from '$lib/games/word-heist/client.svelte';
-	import { describeAllocation, roomCount } from '$lib/games/word-heist/allocation';
+	import { describeSizes, fitStages } from '$lib/games/word-heist/allocation';
 	import { rankBoard } from '$lib/games/word-heist/engine';
 	import { formatClock, type HeistControl, type RoomSummary } from '$lib/games/word-heist/types';
 	import PageHeader from '$lib/components/admin/PageHeader.svelte';
@@ -63,6 +64,8 @@
 
 	const status = $derived(session?.status ?? 'lobby');
 	const timeLeft = $derived(session?.timerEndsAt ? Math.max(0, session.timerEndsAt - now) : (session?.pausedRemainingMs ?? 0));
+	const isGame = $derived(session?.rules.mode === 'game');
+	const noun = $derived(isGame ? 'game' : 'tournament');
 	const byId = $derived(new Map(players.map((p) => [p.id, p])));
 	const counts = $derived.by(() => {
 		const c = { lobby: 0, active: 0, reserve: 0, removed: 0, connected: 0, disconnected: 0 };
@@ -81,6 +84,14 @@
 	});
 	const currentResult = $derived(rounds.find((r) => r.round === currentRound) ?? null);
 	const qualifierCount = $derived(currentResult ? currentResult.rooms.reduce((n, r) => n + r.advancing.length, 0) : 0);
+	// What locking the lobby / preparing the next stage would make.
+	const lobbyPlan = $derived(session && counts.lobby >= 2 ? fitStages(counts.lobby, session.rules.stages, session.rules.advance, session.rules.roomSize) : null);
+	const lobbyText = $derived(lobbyPlan ? `${describeSizes(lobbyPlan[0].sizes)} · ${lobbyPlan.length} stage${lobbyPlan.length === 1 ? '' : 's'}` : 'needs at least 2 players');
+	const nextPlan = $derived(session && qualifierCount >= 2 ? fitStages(qualifierCount, Math.max(1, session.totalStages - session.round), session.rules.advance, session.rules.roomSize) : null);
+	const nextText = $derived(nextPlan ? `${describeSizes(nextPlan[0].sizes)}${nextPlan[0].final ? ' — this will be the final' : ''}` : '—');
+	const stageLabel = $derived(
+		!session ? '' : isGame ? 'Game' : session.round === 0 ? 'Registration' : session.final ? `Final (stage ${session.round} of ${session.totalStages})` : `Stage ${session.round} of ${session.totalStages}`
+	);
 
 	// ── Control ──────────────────────────────────────────────────────────
 	let busy = $state<HeistControl | null>(null);
@@ -103,7 +114,7 @@
 	}
 
 	// ── Dialogs ──────────────────────────────────────────────────────────
-	let confirm = $state<'prepare' | 'end' | 'next' | 'reset' | null>(null);
+	let confirm = $state<'prepare' | 'end' | 'next' | 'close' | 'reset' | null>(null);
 	let resetText = $state('');
 
 	async function confirmed() {
@@ -116,10 +127,14 @@
 					? await run('end', { round: session.round })
 					: action === 'next'
 						? await run('next-round', { round: session.round })
-						: await run('reset', { confirm: resetText.trim().toUpperCase() });
+						: action === 'close'
+							? await run('close')
+							: await run('reset', { confirm: resetText.trim().toUpperCase() });
 		if (ok) {
 			confirm = null;
 			resetText = '';
+			// A closed lobby is done with: back to the Games page.
+			if (action === 'close') await goto('/admin/games');
 		}
 	}
 
@@ -201,21 +216,23 @@
 	<section class="mb-6 flex flex-col gap-4 rounded-lg border border-border bg-card p-4 lg:flex-row lg:items-center" aria-label="Tournament controls">
 		<div class="min-w-0 flex-1">
 			<p class="text-xs font-semibold tracking-[0.08em] text-muted-foreground uppercase">
-				{session.round === 0 ? 'Registration' : session.final ? `Final (round ${session.round})` : `Round ${session.round}`}
+				{stageLabel}
 			</p>
 			<p class="mt-0.5 text-sm text-foreground">
 				{#if status === 'lobby'}
-					{counts.lobby} registered → {describeAllocation(counts.lobby)}
+					{counts.lobby} of {session.rules.maxPlayers} registered → {lobbyText}
 				{:else if status === 'ready'}
-					{session.roundPlayers} players in {session.roomCount} rooms — starter words dealt. Start when everyone is ready.
+					{session.roundPlayers} players in {session.roomCount} rooms, everyone on 0. Start when everyone is ready.
 				{:else if status === 'playing' || status === 'paused'}
-					{session.roomCount} rooms live · {formatClock(timeLeft)} left{status === 'paused' ? ' (paused)' : ''}
+					{session.roomCount} room{session.roomCount === 1 ? '' : 's'} live · {formatClock(timeLeft)} left{timeLeft <= session.rules.finalSeconds * 1000 ? ' (final countdown)' : ''}{status === 'paused' ? ' (paused)' : ''}
 				{:else if status === 'scoring'}
 					Scoring every room…
 				{:else if status === 'review'}
-					{session.openTies ? `${session.openTies} tie${session.openTies === 1 ? '' : 's'} to decide before the next round.` : `${qualifierCount} qualifiers → ${describeAllocation(qualifierCount)}`}
+					{session.openTies ? `${session.openTies} tie${session.openTies === 1 ? '' : 's'} to decide before the next round.` : `${qualifierCount} go through → ${nextText}`}
+				{:else if session.podium.length}
+					{isGame ? 'Game' : 'Tournament'} complete.
 				{:else}
-					Tournament complete.
+					{isGame ? 'Game' : 'Tournament'} closed.
 				{/if}
 			</p>
 		</div>
@@ -242,6 +259,9 @@
 			{:else if status === 'review' && !session.final}
 				<Button onclick={() => (confirm = 'next')} disabled={session.openTies > 0}><ChevronRight class="size-4" /> Prepare round {session.round + 1}…</Button>
 			{/if}
+			{#if status !== 'finished'}
+				<Button variant="outline" class="text-destructive hover:text-destructive" onclick={() => (confirm = 'close')}><Flag class="size-4" /> {status === 'lobby' ? 'Close lobby' : 'End tournament'}</Button>
+			{/if}
 			<Button variant="ghost" class="text-muted-foreground hover:text-destructive" onclick={() => ((resetText = ''), (confirm = 'reset'))}><RotateCcw class="size-4" /> Reset</Button>
 		</div>
 	</section>
@@ -252,7 +272,7 @@
 		<StatCard label={session.round ? 'In this round' : 'In lobby'} value={session.round ? counts.active : counts.lobby} />
 		<StatCard label="Reserve" value={counts.reserve} helper="Joined after rooms were locked" />
 		<StatCard label="Connected" value={counts.connected} icon={Wifi} helper="{counts.disconnected} not seen in the last minute" />
-		<StatCard label="Rooms" value={session.round ? session.roomCount : roomCount(counts.lobby)} icon={LayoutGrid} helper={session.round ? '' : 'Provisional'} />
+		<StatCard label="Rooms" value={session.round ? session.roomCount : (lobbyPlan?.[0].sizes.length ?? 0)} icon={LayoutGrid} helper={session.round ? '' : 'Provisional'} />
 		<StatCard label="Time left" value={status === 'playing' || status === 'paused' ? formatClock(timeLeft) : '—'} icon={Timer} />
 	</div>
 
@@ -278,7 +298,7 @@
 			{#if currentResult && currentResult.rooms.some((r) => r.ties.some((t) => !t.resolved))}
 				<section class="rounded-lg border border-orange-200 bg-orange-50/60 p-5" aria-labelledby="ties-h">
 					<h2 id="ties-h" class="flex items-center gap-2 text-[15px] font-semibold text-orange-900"><Scale class="size-4" /> Ties to decide</h2>
-					<p class="mt-1 text-sm text-orange-900/80">These players are level on score, longest word, steals and time. Click players in place order, then confirm.</p>
+					<p class="mt-1 text-sm text-orange-900/80">These players are level on score and on the longest word made first. Click players in place order, then confirm.</p>
 					<div class="mt-4 space-y-4">
 						{#each currentResult.rooms as room (room.roomId)}
 							{#each room.ties as tie, i (i)}
@@ -326,7 +346,7 @@
 				</div>
 				{#if !session.round}
 					<div class="rounded-lg border border-border bg-card">
-						<StateMessage icon={LayoutGrid} title="Rooms are made when you prepare round 1" description={`${counts.lobby} in the lobby → ${describeAllocation(counts.lobby)}. Players see a provisional room while they wait.`} />
+						<StateMessage icon={LayoutGrid} title="Rooms are made when you prepare round 1" description={`${counts.lobby} in the lobby → ${lobbyText}. Players see a provisional room while they wait.`} />
 					</div>
 				{:else if !rooms.length}
 					<div class="flex items-center gap-3 rounded-lg border border-border bg-card p-6 text-sm text-muted-foreground"><Spinner /> Creating rooms…</div>
@@ -444,9 +464,16 @@
 			<section class="rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
 				<h2 class="flex items-center gap-2 text-[15px] font-semibold text-foreground"><ShieldAlert class="size-4" /> Rules</h2>
 				<ul class="mt-2 space-y-1">
-					<li>Round: {formatClock(session.rules.roundSeconds * 1000)}</li>
-					<li>Words: {session.rules.minWordLength}–{session.rules.maxWordLength} letters (new words up to {session.rules.maxCreateLength})</li>
-					<li>Top 2 per room advance · ties: longest word, steals, then who got there first</li>
+					<li>
+						{isGame
+							? `One room of up to ${session.rules.maxPlayers} players`
+							: `${session.rules.stages} stages · rooms of up to ${session.rules.roomSize} · top ${session.rules.advance} per room go through · up to ${session.rules.maxPlayers} participants`}
+					</li>
+					<li>
+						Tiles drop for {formatClock(session.rules.roundSeconds * 1000)}, then a {session.rules.finalSeconds} s final countdown · a full room gets {session.rules.tileCount} tiles, smaller rooms fewer
+					</li>
+					<li>Words: {session.rules.minWordLength}+ letters from the tiles; steals add at least one tile</li>
+					<li>Everyone starts on 0 · ties: longest word, then who made it first</li>
 				</ul>
 				<a href="/admin/games/word-heist/moderation" class="mt-3 inline-block text-forest-700 underline-offset-4 hover:underline">Word moderation</a>
 			</section>
@@ -466,7 +493,7 @@
 							<li class="flex items-center gap-2 text-sm">
 								<span class="w-5 font-mono text-xs text-muted-foreground">{r.rank}</span>
 								<span class="min-w-0 flex-1 truncate">{r.name}</span>
-								<span class="text-xs text-muted-foreground tabular">{r.longest}L · {r.steals}S</span>
+								<span class="text-xs text-muted-foreground tabular" title="Longest word made · steals">{r.longest}L · {r.steals}S</span>
 								<span class="w-8 text-right font-semibold tabular">{r.score}</span>
 								{#if status !== 'finished'}
 									<button type="button" class="rounded p-1 text-muted-foreground hover:text-destructive" aria-label="Remove {r.name}" onclick={() => (removing = { id: r.playerId, name: r.name })}><UserX class="size-3.5" /></button>
@@ -488,7 +515,15 @@
 					</ul>
 				</div>
 				<div>
-					<h3 class="text-sm font-semibold">Board · {Object.keys(board.words).length} words</h3>
+					<h3 class="text-sm font-semibold">Tiles · {board.tiles.count - (board.drawn ?? 0)} of {board.tiles.count} left in the bag</h3>
+					<ul class="mt-2 flex min-h-8 flex-wrap gap-1">
+						{#each board.pool ?? [] as t (t.id)}
+							<li class="grid size-7 place-items-center rounded border border-sun/60 bg-sun/15 font-mono text-sm font-bold">{t.c}</li>
+						{:else}
+							<li class="text-sm text-muted-foreground">No face-up tiles.</li>
+						{/each}
+					</ul>
+					<h3 class="mt-6 text-sm font-semibold">Board · {Object.keys(board.words).length} words</h3>
 					<ul class="mt-2 flex flex-wrap gap-1.5">
 						{#each Object.entries(board.words).sort((a, b) => b[1].text.length - a[1].text.length) as [id, w] (id)}
 							<li class="rounded-md border border-border px-2 py-1 text-sm">
@@ -505,18 +540,34 @@
 	<!-- Confirmations -->
 	<Modal
 		open={!!confirm}
-		title={confirm === 'prepare' ? 'Lock round 1 rooms?' : confirm === 'end' ? 'End this round now?' : confirm === 'next' ? `Prepare round ${session.round + 1}?` : 'Reset the tournament?'}
+		title={confirm === 'prepare'
+			? 'Lock round 1 rooms?'
+			: confirm === 'end'
+				? 'End this round now?'
+				: confirm === 'next'
+					? `Prepare round ${session.round + 1}?`
+					: confirm === 'close'
+						? status === 'lobby'
+							? 'Close this lobby?'
+							: `End the ${noun} now?`
+						: 'Reset the tournament?'}
 		onclose={() => !busy && (confirm = null)}
 	>
 		{#if confirm === 'prepare'}
 			<p class="text-sm text-muted-foreground">
-				<span class="font-semibold text-foreground">{counts.lobby} players</span> → <span class="font-semibold text-foreground">{describeAllocation(counts.lobby)}</span>. Rooms are locked and starter words dealt. Anyone who registers later joins the reserve list.
+				<span class="font-semibold text-foreground">{counts.lobby} players</span> → <span class="font-semibold text-foreground">{lobbyText}</span>. Rooms are locked and each gets its own bag of tiles; everyone starts on 0. Anyone who registers later joins the reserve list.
 			</p>
 		{:else if confirm === 'end'}
-			<p class="text-sm text-muted-foreground">Moves stop immediately in every room and the top {session.final ? 'three are placed' : 'two in each room qualify'}.</p>
+			<p class="text-sm text-muted-foreground">Moves stop immediately in every room and the top {session.final ? 'three are placed' : `${session.rules.advance} in each room go through`}.</p>
 		{:else if confirm === 'next'}
 			<p class="text-sm text-muted-foreground">
-				<span class="font-semibold text-foreground">{qualifierCount} qualifiers</span> → <span class="font-semibold text-foreground">{describeAllocation(qualifierCount)}</span>{roomCount(qualifierCount) === 1 ? ' — this will be the final' : ''}. Scores start fresh with new starter words.
+				<span class="font-semibold text-foreground">{qualifierCount} players</span> → <span class="font-semibold text-foreground">{nextText}</span>. Scores start again at 0 with fresh bags of tiles.
+			</p>
+		{:else if confirm === 'close'}
+			<p class="text-sm text-muted-foreground">
+				{status === 'lobby'
+					? `Registration closes for good, players are sent back to the home page and the ${noun} moves to the session history.`
+					: `Any running round stops now without scoring, players are sent back to the home page and the ${noun} moves to the session history.`} You'll return to the Games page. This cannot be undone.
 			</p>
 		{:else if confirm === 'reset'}
 			<p class="text-sm text-muted-foreground">Every room, board and round result is deleted and all participants go back to the lobby. This cannot be undone.</p>
@@ -527,12 +578,22 @@
 		{#snippet footer()}
 			<Button variant="ghost" onclick={() => (confirm = null)} disabled={!!busy}>Cancel</Button>
 			<Button
-				variant={confirm === 'end' || confirm === 'reset' ? 'destructive' : 'default'}
+				variant={confirm === 'end' || confirm === 'close' || confirm === 'reset' ? 'destructive' : 'default'}
 				loading={!!busy}
 				disabled={confirm === 'reset' && resetText.trim().toUpperCase() !== code}
 				onclick={confirmed}
 			>
-				{confirm === 'prepare' ? 'Lock rooms' : confirm === 'end' ? 'End round' : confirm === 'next' ? 'Create rooms' : 'Reset'}
+				{confirm === 'prepare'
+					? 'Lock rooms'
+					: confirm === 'end'
+						? 'End round'
+						: confirm === 'next'
+							? 'Create rooms'
+							: confirm === 'close'
+								? status === 'lobby'
+									? 'Close lobby'
+									: 'End tournament'
+								: 'Reset'}
 			</Button>
 		{/snippet}
 	</Modal>

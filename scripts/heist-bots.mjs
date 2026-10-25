@@ -9,9 +9,13 @@
 // the dashboard (lock rooms, start, end, decide ties, next round).
 //
 // --auto: the script also plays organiser — it signs in with ADMIN_EMAIL /
-// ADMIN_PASSWORD from .env, creates a tournament on the live server and
-// drives every round to the final (each round is ended after --seconds).
+// ADMIN_PASSWORD from .env, creates a quick tournament on the live server
+// (40 tiles, one every 3 s) and drives every round to the final. Rounds end
+// on their own when the tiles run out; --seconds ends each one sooner.
 // Open the printed dashboard link to watch.
+//
+// Bots play like people: they only use the face-up tiles — making words from
+// them, or stealing a word by adding one or two tiles.
 //
 // Every bot has its own socket. The report gives the move round trip (send →
 // verdict), how long a move takes to reach the other phones in the room, and
@@ -24,21 +28,10 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword } from 'firebase/auth';
 import { collection, doc, getDoc, getDocs, getFirestore, terminate } from 'firebase/firestore';
 import { createRequire } from 'node:module';
-import { roomSizes } from '../src/lib/games/word-heist/allocation.ts';
 
 const require = createRequire(import.meta.url);
 
-// Copies of engine.ts helpers (that file's extensionless imports don't load in plain Node).
-function pluralForms(word) {
-	const forms = new Set();
-	if (/(S|X|Z|CH|SH)$/.test(word)) forms.add(word + 'ES');
-	else forms.add(word + 'S');
-	if (word.endsWith('Y') && word.length > 1 && !'AEIOU'.includes(word[word.length - 2])) forms.add(word.slice(0, -1) + 'IES');
-	if (word.endsWith('O')) forms.add(word + 'ES');
-	if (word.endsWith('F')) forms.add(word.slice(0, -1) + 'VES');
-	if (word.endsWith('FE')) forms.add(word.slice(0, -2) + 'VES');
-	return [...forms];
-}
+// Copy of an engine.ts helper (that file's extensionless imports don't load in plain Node).
 function scoresFromWords(board) {
 	const out = {};
 	for (const id of Object.keys(board.players)) out[id] = 0;
@@ -49,12 +42,13 @@ function scoresFromWords(board) {
 // ── Args ─────────────────────────────────────────────────────────────────
 
 function parseArgs(argv) {
-	const args = { code: '', bots: 200, url: 'http://localhost:5173', auto: false, seconds: 60 };
+	const args = { code: '', bots: 200, url: 'http://localhost:5173', auto: false, seconds: 0, breakSeconds: 10 };
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		if (a === '--bots' || a === '-n') args.bots = Number(argv[++i]);
 		else if (a === '--url') args.url = argv[++i];
 		else if (a === '--seconds') args.seconds = Number(argv[++i]);
+		else if (a === '--break') args.breakSeconds = Number(argv[++i]);
 		else if (a === '--auto') args.auto = true;
 		else if (!a.startsWith('-')) args.code = a.trim().toUpperCase();
 	}
@@ -63,9 +57,9 @@ function parseArgs(argv) {
 
 const args = parseArgs(process.argv.slice(2));
 const BASE = args.url.replace(/\/+$/, '');
-if ((!args.auto && !/^ZH[A-Z2-9]{4}$/.test(args.code)) || !(args.bots >= 2 && args.bots <= 300) || !(args.seconds >= 10)) {
+if ((!args.auto && !/^ZH[A-Z2-9]{4}$/.test(args.code)) || !(args.bots >= 2 && args.bots <= 300) || !(args.seconds === 0 || args.seconds >= 10)) {
 	console.error('Usage: npm run heist:bots -- <CODE> [--bots 2-300] [--url http://localhost:5173]');
-	console.error('       npm run heist:bots -- --auto [--bots 200] [--seconds 60]');
+	console.error('       npm run heist:bots -- --auto [--bots 200] [--seconds 60 (end rounds early)] [--break 10 (seconds before starting each later stage)]');
 	process.exit(1);
 }
 const env = process.env;
@@ -82,22 +76,36 @@ for (const d of ['english', 'american', 'british']) {
 		for (const w of require(`wordlist-english/${d}-words-${n}.json`)) if (/^[a-z]+$/.test(w)) WORDS.add(w.toUpperCase());
 	}
 }
-const COMMON = [];
-for (const d of ['english', 'american', 'british']) for (const n of [10, 20]) for (const w of require(`wordlist-english/${d}-words-${n}.json`)) if (/^[a-z]{3,5}$/.test(w)) COMMON.push(w.toUpperCase());
+const COMMON = new Set();
+for (const d of ['english', 'american', 'british']) for (const n of [10, 20]) for (const w of require(`wordlist-english/${d}-words-${n}.json`)) if (/^[a-z]{3,7}$/.test(w)) COMMON.add(w.toUpperCase());
+const COMMON_LIST = [...COMMON];
 const sortKey = (w) => [...w].sort().join('');
 const ANAGRAMS = new Map();
 for (const w of WORDS) {
-	if (w.length > 12) continue;
+	if (w.length > 14) continue;
 	const k = sortKey(w);
 	if (!ANAGRAMS.has(k)) ANAGRAMS.set(k, []);
 	ANAGRAMS.get(k).push(w);
 }
-/** Words that keep every letter of `w` plus one more, excluding its plurals. */
-function stealsOf(w, maxLen) {
-	if (w.length + 1 > maxLen) return [];
-	const plurals = new Set(pluralForms(w));
+/** Can `word` be spelled from these tile letters (repeats counted)? */
+function fromTiles(word, letters) {
+	const left = [...letters];
+	for (const c of word) {
+		const i = left.indexOf(c);
+		if (i < 0) return false;
+		left.splice(i, 1);
+	}
+	return true;
+}
+/** Steals of `w` that add one or two of these tile letters (never just S on the end). */
+function stealsOf(w, letters) {
+	const adds = new Set();
+	for (let i = 0; i < letters.length; i++) {
+		adds.add(letters[i]);
+		for (let j = i + 1; j < letters.length; j++) adds.add(letters[i] + letters[j]);
+	}
 	const out = [];
-	for (const c of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ') for (const cand of ANAGRAMS.get(sortKey(w + c)) ?? []) if (!plurals.has(cand)) out.push(cand);
+	for (const add of adds) for (const cand of ANAGRAMS.get(sortKey(w + add)) ?? []) if (cand !== w + 'S') out.push(cand);
 	return out;
 }
 
@@ -147,7 +155,8 @@ if (args.auto) {
 	const res = await fetch(`${BASE}/api/live/heist`, {
 		method: 'POST',
 		headers: { 'content-type': 'application/json', authorization: `Bearer ${adminToken}` },
-		body: JSON.stringify({ rules: { roundSeconds: 600 } }) // rounds are ended by this script
+		// Two-minute rounds; 3 stages with 2 going through takes up to 432.
+		body: JSON.stringify({ rules: { mode: 'tournament', roundSeconds: 120, stages: 3, advance: 2, maxPlayers: Math.max(args.bots, 24) } })
 	});
 	const data = await res.json().catch(() => ({}));
 	if (!res.ok) {
@@ -197,6 +206,11 @@ console.log(`Players:   ${BASE}/join/heist/${code}\n`);
 const sentAt = new Map();
 let finished = false;
 
+/** Avatars (see src/lib/games/word-heist/avatars.ts): 100, by index. */
+const AVATAR_COUNT = 100;
+const AVATAR_CLASH = 7;
+const avatarStats = { rooms: 0, kept: 0, moved: 0 };
+
 class Bot {
 	constructor(i) {
 		this.i = i;
@@ -206,6 +220,9 @@ class Bot {
 		this.board = null;
 		this.pending = new Map();
 		this.seen = new Set();
+		// Every 4th bot wants the same avatar, so rooms are sure to have clashes to settle;
+		// every 50th sends a bad one (the server must pick for it); the rest pick at random.
+		this.avatar = i % 50 === 3 ? 999 : i % 4 === 0 ? AVATAR_CLASH : Math.floor(Math.random() * AVATAR_COUNT);
 	}
 
 	async open() {
@@ -247,7 +264,7 @@ class Bot {
 				this.id = m.playerId;
 				resolve();
 			};
-			this.ws.send(JSON.stringify({ t: 'join', code, name: this.name }));
+			this.ws.send(JSON.stringify({ t: 'join', code, name: this.name, avatar: this.avatar }));
 		});
 	}
 
@@ -270,25 +287,27 @@ class Bot {
 		});
 	}
 
-	/** One turn: usually steal a word (anyone's), sometimes make one, now and then a bad move. */
+	/** One turn, from the face-up tiles: steal a word if it can, else make one; now and then a bad move. */
 	async turn() {
 		const board = this.board;
 		if (!board || board.status !== 'playing') return;
 		const rules = board.rules;
+		const letters = board.pool.map((t) => t.c);
 		const onBoard = new Set(Object.values(board.words).map((w) => w.text));
-		const targets = Object.entries(board.words)
+		const steals = Object.values(board.words)
 			.filter(() => Math.random() < 0.6)
-			.map(([id, w]) => [id, stealsOf(w.text, rules.maxWordLength).filter((c) => !onBoard.has(c))])
-			.filter(([, c]) => c.length);
-		let body;
-		if (targets.length && Math.random() < 0.8) {
-			const [sourceId, cands] = pick(targets);
-			body = { kind: 'steal', sourceId, text: pick(cands) };
-		} else {
-			const fresh = COMMON.filter((w) => w.length >= rules.minWordLength && w.length <= rules.maxCreateLength && !onBoard.has(w));
-			const roll = Math.random();
-			body = { kind: 'create', text: roll < 0.05 ? 'QZXV' : roll < 0.08 ? 'AB' : roll < 0.11 && onBoard.size ? pick([...onBoard]) : pick(fresh) };
+			.flatMap((w) => stealsOf(w.text, letters))
+			.filter((c) => !onBoard.has(c));
+		const roll = Math.random();
+		let text;
+		if (roll < 0.04) text = pick(['QZXV', 'AB', 'ZEBRA']); // not a word / too short / letters not there
+		else if (steals.length && roll < 0.8) text = pick(steals);
+		else {
+			const made = COMMON_LIST.filter((w) => w.length >= rules.minWordLength && !onBoard.has(w) && fromTiles(w, letters));
+			if (!made.length) return; // nothing to play yet: wait for more tiles
+			text = pick(made);
 		}
+		const body = { text };
 		stats.moves++;
 		const t0 = Date.now();
 		const out = await this.send(body);
@@ -352,20 +371,26 @@ try {
 		if (args.auto) {
 			if (session.status === 'lobby') {
 				await wait(1000);
-				const sizes = roomSizes(joined.length);
-				console.log(`Locking rooms: ${joined.length} → ${sizes.length} rooms (${sizes.join(', ')})`);
+				console.log(`Locking rooms: ${joined.length} players`);
 				await control('prepare');
 			}
 			await waitFor(() => session.status === 'ready', 'round to be prepared');
+			// Rooms for the next stage are allotted on their own; like an organiser, take a breather before starting.
+			if (session.round > 1 && args.breakSeconds > 0) {
+				console.log(`  Stage ${session.round} rooms are ready (${session.roomCount}) — starting in ${args.breakSeconds} s`);
+				await wait(args.breakSeconds * 1000);
+				if (session.status !== 'ready') problem(`stage ${session.round} started without the organiser`);
+			}
 			await control('start');
 		} else console.log('Waiting for the organiser to lock rooms and start…');
 		await waitFor(() => session.status === 'playing', 'the round to start');
 		const round = session.round;
 		const final = session.final;
-		const ending = args.auto ? wait(args.seconds * 1000).then(() => control('end', { round })) : Promise.resolve();
+		const ending = args.auto && args.seconds ? wait(args.seconds * 1000).then(() => (session.round === round && session.status === 'playing' ? control('end', { round }) : undefined)) : Promise.resolve();
 		await playRound(round);
 		await ending;
-		await waitFor(() => ['review', 'finished'].includes(session.status) && session.round === round, 'results');
+		// Results, or (with no ties to decide) the next stage's rooms already allotted.
+		await waitFor(() => (['review', 'finished'].includes(session.status) && session.round === round) || session.round > round, 'results');
 		roundsPlayed.push(round);
 		if (session.openTies) {
 			console.log(`  ${session.openTies} tie(s) at the cutoff`);
@@ -393,11 +418,14 @@ await wait(2_500); // one save interval
 const roundDocs = (await getDocs(collection(db, 'liveSessions', code, 'rounds'))).docs.map((d) => d.data()).sort((a, b) => a.round - b.round);
 const boardDocs = new Map((await getDocs(collection(db, 'liveSessions', code, 'boards'))).docs.map((d) => [d.id, d.data()]));
 if (roundDocs.length !== roundsPlayed.length) problem(`${roundsPlayed.length} rounds played but ${roundDocs.length} saved`);
+const byId = new Map(joined.map((b) => [b.id, b]));
 for (const r of roundDocs) {
 	const players = r.rooms.flatMap((room) => room.ranking.map((e) => e.playerId));
 	if (new Set(players).size !== players.length) problem(`round ${r.round}: a player is in two rooms`);
 	const sizes = r.rooms.map((room) => room.ranking.length).sort((a, b) => b - a);
-	if (sizes.join() !== roomSizes(players.length).join()) problem(`round ${r.round}: room sizes ${sizes.join(',')} ≠ policy ${roomSizes(players.length).join(',')}`);
+	// Rooms hold at most 12, sizes differ by at most one, and the final is a single room.
+	if (sizes[0] > 12 || sizes[0] - sizes[sizes.length - 1] > 1) problem(`round ${r.round}: uneven or oversized rooms ${sizes.join(',')}`);
+	if (r.final && sizes.length !== 1) problem(`round ${r.round}: the final has ${sizes.length} rooms`);
 	for (const room of r.rooms) {
 		const b = boardDocs.get(room.roomId);
 		if (!b) {
@@ -408,9 +436,30 @@ for (const r of roundDocs) {
 		for (const [id, p] of Object.entries(b.players)) if (!p.removed && p.score !== fromWords[id]) problem(`round ${r.round} room ${room.number}: ${p.name} score ${p.score} ≠ letters held ${fromWords[id]}`);
 		const texts = Object.values(b.words).map((w) => w.text);
 		if (new Set(texts).size !== texts.length) problem(`round ${r.round} room ${room.number}: duplicate word on the board`);
-		const want = Math.min(r.final ? 3 : 2, room.ranking.length);
+		const want = Math.min(r.places ?? (r.final ? 3 : 2), room.ranking.length);
 		if (room.advancing.length !== want) problem(`round ${r.round} room ${room.number}: ${room.advancing.length} advancing, expected ${want}`);
 		for (const e of room.ranking) if (b.players[e.playerId] && b.players[e.playerId].score !== e.score) problem(`round ${r.round}: saved ranking differs from the board for ${e.name}`);
+
+		// Avatars: one each, all different in the room; colours (seats) all different too.
+		const seated = Object.entries(b.players);
+		const avatars = seated.map(([, p]) => p.avatar);
+		if (avatars.some((a) => !Number.isInteger(a) || a < 0 || a >= AVATAR_COUNT)) problem(`round ${r.round} room ${room.number}: a player has no valid avatar`);
+		if (new Set(avatars).size !== avatars.length) problem(`round ${r.round} room ${room.number}: two players share an avatar`);
+		const seats = seated.map(([, p]) => p.seat).sort((x, y) => x - y);
+		if (seats.join() !== seated.map((_, i) => i).join()) problem(`round ${r.round} room ${room.number}: seats (colours) are not 0…${seated.length - 1}`);
+		// Everyone who asked for an avatar nobody else in the room wanted first got it.
+		const firstAsked = new Set();
+		for (const [id, p] of seated.sort(([, x], [, y]) => x.seat - y.seat)) {
+			const wanted = byId.get(id)?.avatar;
+			if (wanted === undefined || wanted < 0 || wanted >= AVATAR_COUNT) continue;
+			if (!firstAsked.has(wanted)) {
+				firstAsked.add(wanted);
+				if (p.avatar !== wanted) problem(`round ${r.round} room ${room.number}: ${p.name} asked for avatar ${wanted} first but got ${p.avatar}`);
+			}
+			if (p.avatar === wanted) avatarStats.kept++;
+			else avatarStats.moved++;
+		}
+		avatarStats.rooms++;
 	}
 	const adv = r.rooms.reduce((n, room) => n + room.advancing.length, 0);
 	console.log(`  Round ${r.round}${r.final ? ' (final)' : ''}: ${players.length} players, ${r.rooms.length} rooms, ${adv} ${r.final ? 'on the podium' : 'advanced'} ✓`);
@@ -419,6 +468,9 @@ const saved = (await getDoc(doc(db, 'liveSessions', code))).data();
 if (session.status === 'finished') console.log(`  Podium: ${session.podium.map((p) => `${p.rank}. ${p.name} (${p.score})`).join(' · ')}`);
 else problem(`tournament ended in status "${session.status}", not finished`);
 if (saved?.status !== session.status) problem(`saved status "${saved?.status}" ≠ live status "${session.status}"`);
+
+console.log(`  Avatars: ${avatarStats.rooms} rooms, all different in each · ${avatarStats.kept} got the one they picked, ${avatarStats.moved} moved to a free one (a clash or a bad pick)`);
+if (!avatarStats.moved) problem('no avatar clashes were settled — the test should have forced some');
 
 console.log(`\nMoves: ${stats.moves} sent, ${stats.ok} accepted, ${stats.timeouts} without an answer`);
 console.log(`Verdict round trip: p50 ${percentile(stats.rtt, 50)} ms · p95 ${percentile(stats.rtt, 95)} ms · max ${Math.max(0, ...stats.rtt)} ms`);

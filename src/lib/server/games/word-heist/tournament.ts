@@ -1,21 +1,27 @@
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { assignRooms, roomCount } from '$lib/games/word-heist/allocation';
+import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
+import { AVATAR_COUNT, isAvatar, uniqueAvatars } from '$lib/games/word-heist/avatars';
+import { assignRooms, fitStages } from '$lib/games/word-heist/allocation';
 import {
 	applyMove,
-	dealStarters,
+	makeBag,
 	newBoard,
 	nextRoster,
+	placesFor,
 	rankBoard,
 	removeFromBoard,
 	resolveTie,
+	revealTiles,
 	rng,
 	roomDecided,
 	roomResult,
+	roundClock,
 	type MoveDeps
 } from '$lib/games/word-heist/engine';
-import type { AdminPlayer, BoardView, HeistServerMessage, MeView, MoveKind, TournamentView } from '$lib/games/word-heist/protocol';
+import type { AdminPlayer, BoardView, HeistServerMessage, MeView, TournamentView } from '$lib/games/word-heist/protocol';
 import {
 	MAX_PLAYERS,
+	normalizeRules,
+	tilePlan,
 	type Board,
 	type HeistControl,
 	type HeistPlayer,
@@ -59,7 +65,9 @@ const NAME_MAX = 20;
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 const roomIdFor = (seed: string, round: number, number: number) => `r${round}-${number}-${sha256(`${seed}:room:${round}:${number}`).slice(0, 16)}`;
-const starterSeed = (seed: string, round: number, number: number) => parseInt(sha256(`${seed}:starters:${round}:${number}`).slice(0, 8), 16);
+const bagSeed = (seed: string, round: number, number: number) => parseInt(sha256(`${seed}:tiles:${round}:${number}`).slice(0, 8), 16);
+/** The server's tile clock fires just after each tile is due. */
+const TICK_SLACK_MS = 20;
 
 export const summaryOf = (b: Board): RoomSummary => ({
 	round: b.round,
@@ -81,6 +89,9 @@ const boardView = (b: Board): BoardView => ({
 	endsAt: b.endsAt,
 	pausedRemainingMs: b.pausedRemainingMs,
 	rules: b.rules,
+	tiles: b.tiles,
+	drawn: b.drawn,
+	pool: b.pool,
 	players: b.players,
 	words: b.words,
 	feed: b.feed
@@ -124,8 +135,6 @@ export interface TournamentDeps {
 	store: HeistStore;
 	/** Dictionary + moderation for moves (kept fresh by the hub). */
 	deps: () => MoveDeps;
-	/** Starter-word pools by length, already moderated. */
-	starters: () => Record<number, readonly string[]>;
 	now?: () => number;
 }
 
@@ -139,6 +148,8 @@ export class Tournament {
 	players = new Map<string, HeistPlayer>();
 	#tokens = new Map<string, string>();
 	#names = new Set<string>();
+	/** A game's avatars held for joins still being saved, so two can't take the same one at once. */
+	#pendingAvatars = new Set<number>();
 	/** Every round's boards, by room id. */
 	boards = new Map<string, Board>();
 	rounds = new Map<number, RoundResult>();
@@ -165,6 +176,10 @@ export class Tournament {
 	private constructor(snapshot: Snapshot, d: TournamentDeps) {
 		this.code = snapshot.session.code;
 		this.s = snapshot.session;
+		// Tournaments saved before modes and tiles existed open with today's rules.
+		this.s.rules = normalizeRules(this.s.rules);
+		this.s.totalStages ??= this.s.rules.stages;
+		this.s.closed ??= false;
 		this.#seed = snapshot.seed;
 		this.#d = d;
 		this.#now = d.now ?? Date.now;
@@ -173,7 +188,11 @@ export class Tournament {
 			if (tokenHash) this.#tokens.set(id, tokenHash);
 			this.#names.add(player.name.toLowerCase());
 		}
-		for (const b of snapshot.boards) this.boards.set(b.roomId, b);
+		for (const b of snapshot.boards) {
+			const rules = normalizeRules(b.rules);
+			const tiles = b.tiles ?? tilePlan(Object.keys(b.players).length, rules);
+			this.boards.set(b.roomId, { ...b, rules, tiles, bag: b.bag ?? '', drawn: b.drawn ?? 0, pool: b.pool ?? [] });
+		}
 		for (const r of snapshot.rounds) this.rounds.set(r.round, r);
 		this.#saveTimer = setInterval(() => void this.save(), SAVE_MS);
 		this.#saveTimer.unref?.();
@@ -198,6 +217,8 @@ export class Tournament {
 			timerEndsAt: null,
 			pausedRemainingMs: null,
 			final: false,
+			totalStages: rules.stages,
+			closed: false,
 			lobbyRooms: 0,
 			openTies: 0,
 			podium: [],
@@ -214,7 +235,7 @@ export class Tournament {
 		if (!snap || !snap.seed) return null;
 		const t = new Tournament(snap, d);
 		t.#recomputeLobby();
-		if (t.s.status === 'playing' && t.s.timerEndsAt) t.#armTimer(t.s.timerEndsAt);
+		if (t.s.status === 'playing' && t.s.timerEndsAt) t.#tick();
 		if (t.s.status === 'scoring') void t.#op(() => t.#finish(t.s.round));
 		return t;
 	}
@@ -239,6 +260,9 @@ export class Tournament {
 			playerCount: s.playerCount,
 			round: s.round,
 			final: s.final,
+			totalStages: s.totalStages,
+			closed: s.closed,
+			takenAvatars: s.rules.mode === 'game' ? this.#gameAvatars() : [],
 			roomCount: s.roomCount,
 			roundPlayers: s.roundPlayers,
 			timerEndsAt: s.timerEndsAt,
@@ -259,7 +283,8 @@ export class Tournament {
 			round: p.round,
 			roomNumber: p.roomNumber,
 			place: p.place ?? null,
-			lobbyRoom: p.status === 'lobby' ? (this.#lobbyRoom.get(id) ?? null) : null
+			lobbyRoom: p.status === 'lobby' ? (this.#lobbyRoom.get(id) ?? null) : null,
+			avatar: p.avatar ?? 0
 		};
 	}
 
@@ -351,28 +376,46 @@ export class Tournament {
 		return a.length === b.length && timingSafeEqual(a, b);
 	}
 
-	async join(rawName: unknown): Promise<{ playerId: string; token: string; name: string }> {
+	/** Avatars picked by everyone still in a game (a game is one room, so each is taken once). */
+	#gameAvatars() {
+		const out: number[] = [];
+		for (const p of this.players.values()) if (p.status !== 'removed' && p.avatar !== undefined) out.push(p.avatar);
+		return out;
+	}
+
+	async join(rawName: unknown, rawAvatar?: unknown): Promise<{ playerId: string; token: string; name: string }> {
 		const s = this.s;
-		if (s.status === 'finished') throw new HeistError('This tournament has finished.');
+		if (s.status === 'finished') throw new HeistError(`This ${this.#noun} has finished.`);
 		if (!s.registrationOpen) throw new HeistError('Registration is closed.');
-		if (this.players.size >= MAX_PLAYERS) throw new HeistError('This tournament is full.');
+		if (this.players.size >= MAX_PLAYERS) throw new HeistError(`This ${this.#noun} is full.`);
+		if (s.status === 'lobby' && this.#lobbyCount() >= s.rules.maxPlayers) throw new HeistError(`This ${this.#noun} is full (${s.rules.maxPlayers} players).`);
 		const name = cleanName(rawName);
 		const key = name.toLowerCase();
-		if (this.#names.has(key)) throw new HeistError('That name is already taken in this tournament. Try another.');
+		if (this.#names.has(key)) throw new HeistError(`That name is already taken in this ${this.#noun}. Try another.`);
+		// In a game everyone shares one room, so an avatar can be taken only once. In a
+		// tournament rooms aren't known yet: clashes are settled when rooms are locked.
+		const game = s.rules.mode === 'game';
+		const taken = game ? new Set([...this.#gameAvatars(), ...this.#pendingAvatars]) : new Set<number>();
+		if (isAvatar(rawAvatar) && taken.has(rawAvatar)) throw new HeistError('Someone already picked that avatar. Choose another.');
+		const avatar = isAvatar(rawAvatar) ? rawAvatar : uniqueAvatars([...taken, randomInt(AVATAR_COUNT)]).at(-1)!;
 		this.#names.add(key);
+		if (game) this.#pendingAvatars.add(avatar);
 
 		const id = randomBytes(15).toString('base64url').replace(/[-_]/g, 'x');
 		const token = randomBytes(24).toString('base64url');
 		const now = this.#now();
 		// Rooms are locked once round 1 is prepared: later arrivals are reserves.
 		const status: PlayerStatus = s.status === 'lobby' ? 'lobby' : 'reserve';
-		const player: HeistPlayer = { name, joinedAt: now, status, round: 0, roomId: null, roomNumber: null, lastSeenAt: now, place: null };
+		const player: HeistPlayer = { name, joinedAt: now, status, round: 0, roomId: null, roomNumber: null, lastSeenAt: now, place: null, avatar };
 		try {
 			// Saved before the phone is told it joined, so its token survives a restart.
 			await this.#d.store.addPlayer(this.code, id, player, sha256(token));
 		} catch (err) {
 			this.#names.delete(key);
 			throw err;
+		} finally {
+			// Once saved the avatar is in `players`; if saving failed it's free again.
+			this.#pendingAvatars.delete(avatar);
 		}
 		// The lobby may have been locked while saving.
 		if (player.status === 'lobby' && this.s.status !== 'lobby') {
@@ -390,14 +433,18 @@ export class Tournament {
 	}
 
 	/** Judge and apply one move. Synchronous: the board can't change underneath it. */
-	move(id: string, m: { requestId: string; kind: MoveKind; text: string; sourceId?: string }): MoveResult {
+	move(id: string, m: { requestId: string; text: string }): MoveResult {
 		const p = this.players.get(id);
 		if (!p) return { ok: false, message: 'Join the tournament first.' };
 		if (p.status === 'removed') return { ok: false, message: 'An organiser removed you from this tournament.' };
 		if (p.status !== 'playing' || p.round !== this.s.round || !p.roomId) return { ok: false, message: "You're not in a round right now." };
-		const board = this.boards.get(p.roomId);
+		let board = this.boards.get(p.roomId);
 		if (!board) return { ok: false, message: 'Your room is not ready yet.' };
-		const out = applyMove(board, { ...m, playerId: id }, this.#now(), this.#d.deps());
+		const now = this.#now();
+		// A tile due this instant counts even if the clock hasn't fired yet.
+		const revealed = revealTiles(board, now);
+		if (revealed) this.#setBoard((board = revealed));
+		const out = applyMove(board, { ...m, playerId: id }, now, this.#d.deps());
 		if (out.board) this.#setBoard(out.board);
 		return out.result;
 	}
@@ -440,6 +487,9 @@ export class Tournament {
 				case 'remove-player':
 					this.#remove(String(body.playerId ?? ''));
 					break;
+				case 'close':
+					this.#close();
+					break;
 				case 'reset':
 					if (String(body.confirm ?? '').trim().toUpperCase() !== this.code) throw new HeistError('Type the game code to confirm the reset.');
 					await this.#reset();
@@ -469,31 +519,50 @@ export class Tournament {
 			.sort(([ia, a], [ib, b]) => a.joinedAt - b.joinedAt || ia.localeCompare(ib))
 			.map(([id, p]) => ({ id, name: p.name }));
 		if (roster.length < 2) throw new HeistError('At least 2 players must register first.');
+		s.totalStages = s.rules.stages;
+		this.#buildRound(1, roster);
 		s.status = 'ready';
 		s.round = 1;
-		this.#buildRound(1, roster);
 		this.#lobbyRoom.clear();
 		s.lobbyRooms = 0;
 	}
 
+	/**
+	 * Make a stage's rooms. The planned stages are kept if the players who are
+	 * left can fill them; if not (a small crowd, removals) the tournament gets
+	 * shorter and goes to the final sooner. Each room's tiles depend on how
+	 * many play in it.
+	 */
 	#buildRound(round: number, roster: { id: string; name: string }[]) {
-		const pools = this.#d.starters();
-		const rooms = assignRooms(roster);
-		const now = this.#now();
+		const s = this.s;
+		const plan = fitStages(roster.length, Math.max(1, s.totalStages - round + 1), s.rules.advance, s.rules.roomSize);
+		if (!plan) throw new HeistError(`Too many players left for the final (max ${s.rules.roomSize}).`);
+		const rooms = assignRooms(roster, plan[0].sizes.length);
 		rooms.forEach((members, i) => {
 			const number = i + 1;
 			const roomId = roomIdFor(this.#seed, round, number);
-			const starters = dealStarters(
-				members.map((m) => m.id),
-				pools,
-				rng(starterSeed(this.#seed, round, number))
-			);
-			this.#setBoard(newBoard({ round, roomId, number, rules: this.s.rules, players: members, starters, now }), false);
+			const tiles = tilePlan(members.length, s.rules);
+			const bag = makeBag(tiles.count, rng(bagSeed(this.#seed, round, number)));
+			// Nobody in a room shares an avatar: a later player with a clash gets the next free one.
+			const avatars = uniqueAvatars(members.map((m) => this.players.get(m.id)?.avatar ?? 0));
+			const seated = members.map((m, j) => ({ ...m, avatar: avatars[j] }));
+			this.#setBoard(newBoard({ round, roomId, number, rules: s.rules, tiles, players: seated, bag }), false);
 			for (const m of members) this.#patchPlayer(m.id, { status: 'playing', round, roomId, roomNumber: number, place: null });
 		});
-		this.s.roomCount = rooms.length;
-		this.s.roundPlayers = roster.length;
-		this.s.final = rooms.length === 1;
+		s.totalStages = round - 1 + plan.length;
+		s.roomCount = rooms.length;
+		s.roundPlayers = roster.length;
+		s.final = plan[0].final;
+	}
+
+	get #noun() {
+		return this.s.rules.mode === 'game' ? 'game' : 'tournament';
+	}
+
+	#lobbyCount() {
+		let n = 0;
+		for (const p of this.players.values()) if (p.status === 'lobby') n++;
+		return n;
 	}
 
 	#currentBoards() {
@@ -504,21 +573,22 @@ export class Tournament {
 		const s = this.s;
 		if (s.status === 'playing' || s.status === 'paused') return;
 		if (s.status !== 'ready') throw new HeistError('Prepare the round first.');
-		const endsAt = this.#now() + s.rules.roundSeconds * 1000;
-		for (const b of this.#currentBoards()) this.#setBoard({ ...b, status: 'playing', endsAt, pausedRemainingMs: null });
+		const endsAt = this.#now() + (s.rules.roundSeconds + s.rules.finalSeconds) * 1000;
+		for (const b of this.#currentBoards()) this.#setBoard({ ...b, status: 'playing', endsAt, pausedRemainingMs: null }, false);
 		s.status = 'playing';
 		s.timerEndsAt = endsAt;
 		s.pausedRemainingMs = null;
 		s.startedAt ??= this.#now();
-		this.#armTimer(endsAt);
+		this.#tick(); // turns over the opening tiles, which pushes every board
 	}
 
 	#pause() {
 		const s = this.s;
 		if (s.status === 'paused') return;
 		if (s.status !== 'playing' || !s.timerEndsAt) throw new HeistError('The round is not running.');
-		const remaining = Math.max(0, s.timerEndsAt - this.#now());
-		for (const b of this.#currentBoards()) this.#setBoard({ ...b, status: 'paused', endsAt: null, pausedRemainingMs: remaining });
+		const now = this.#now();
+		const remaining = Math.max(0, s.timerEndsAt - now);
+		for (const b of this.#currentBoards()) this.#setBoard({ ...(revealTiles(b, now) ?? b), status: 'paused', endsAt: null, pausedRemainingMs: remaining });
 		s.status = 'paused';
 		s.timerEndsAt = null;
 		s.pausedRemainingMs = remaining;
@@ -534,19 +604,34 @@ export class Tournament {
 		s.status = 'playing';
 		s.timerEndsAt = endsAt;
 		s.pausedRemainingMs = null;
-		this.#armTimer(endsAt);
+		this.#tick();
 	}
 
-	/** The server ends the round itself when time is up — no screen needs to be open. */
-	#armTimer(endsAt: number) {
+	/**
+	 * The server's tile clock: turns over every tile that is due in every room,
+	 * then sleeps until the next tile (or the end of the round, which it ends
+	 * itself — no screen needs to be open). Pausing disarms it.
+	 */
+	#tick() {
 		this.#disarmTimer();
-		const round = this.s.round;
-		this.#roundTimer = setTimeout(
-			() => {
-				void this.control('end', { round }).catch((err) => console.error('[word-heist] auto end', err));
-			},
-			Math.max(0, endsAt - this.#now()) + 250
-		);
+		const s = this.s;
+		if (s.status !== 'playing' || !s.timerEndsAt) return;
+		const now = this.#now();
+		if (now >= s.timerEndsAt) {
+			const round = s.round;
+			void this.control('end', { round }).catch((err) => console.error('[word-heist] auto end', err));
+			return;
+		}
+		// Not saved: after a restart the same tiles are turned over again from the bag and the clock.
+		// (Saving every board on every tile slowed big rounds down; moves still save as usual.)
+		for (const b of this.#currentBoards()) {
+			const next = revealTiles(b, now);
+			if (next) this.#setBoard(next, true, false);
+		}
+		// Rooms of different sizes drop tiles at different rates: wake for the soonest.
+		let at = s.timerEndsAt;
+		for (const b of this.#currentBoards()) at = Math.min(at, roundClock(b.tiles, s.timerEndsAt, null, now).nextTileAt ?? at);
+		this.#roundTimer = setTimeout(() => this.#tick(), Math.max(0, at - now) + TICK_SLACK_MS);
 		this.#roundTimer.unref?.();
 	}
 
@@ -566,12 +651,14 @@ export class Tournament {
 		for (const b of this.#currentBoards()) if (b.status !== 'finished') this.#setBoard({ ...b, status: 'finished', endsAt: null, pausedRemainingMs: null });
 		let result = this.rounds.get(round);
 		if (!result) {
+			const places = placesFor(s.final, s.rules.advance);
 			result = {
 				round,
 				final: s.final,
+				places,
 				rooms: this.#currentBoards()
 					.sort((a, b) => a.number - b.number)
-					.map((b) => roomResult(b.roomId, b.number, rankBoard(b), s.final)),
+					.map((b) => roomResult(b.roomId, b.number, rankBoard(b), places, s.final)),
 				createdAt: this.#now()
 			};
 			this.#setRound(result);
@@ -606,6 +693,17 @@ export class Tournament {
 			s.winner = s.podium[0] ? { name: s.podium[0].name, score: s.podium[0].score } : null;
 			s.endedAt = this.#now();
 			s.registrationOpen = false;
+			return;
+		}
+		// Every place decided: allot the next stage's rooms straight away so players see
+		// where they're going. Nothing starts until an organiser presses Start.
+		if (!result.final && s.openTies === 0) {
+			try {
+				this.#nextRound(s.round);
+			} catch (err) {
+				// Stays in review: the organiser can prepare the stage by hand and sees why.
+				console.warn('[word-heist] could not allot the next stage', err);
+			}
 		}
 	}
 
@@ -617,7 +715,7 @@ export class Tournament {
 		const i = r.rooms.findIndex((room) => room.roomId === body.roomId);
 		if (i < 0) throw new HeistError('That room is not in this round.');
 		const tieIndex = Number.isInteger(body.tieIndex) ? (body.tieIndex as number) : 0;
-		const updated = resolveTie(r.rooms[i], tieIndex, body.picks, r.final);
+		const updated = resolveTie(r.rooms[i], tieIndex, body.picks, r.places ?? placesFor(r.final, 2));
 		if (typeof updated === 'string') throw new HeistError(updated);
 		const next: RoundResult = { ...r, rooms: r.rooms.map((room, j) => (j === i ? (updated as RoomResult) : room)) };
 		this.#setRound(next);
@@ -655,6 +753,16 @@ export class Tournament {
 		if (wasLobby) this.#recomputeLobby();
 	}
 
+	/** Close the lobby / end the tournament for good: no one can join, any running round stops unscored. */
+	#close() {
+		const s = this.s;
+		if (s.status === 'finished') return;
+		this.#disarmTimer();
+		for (const b of this.#currentBoards()) if (b.status !== 'finished') this.#setBoard({ ...b, status: 'finished', endsAt: null, pausedRemainingMs: null });
+		Object.assign(s, { status: 'finished', closed: true, registrationOpen: false, timerEndsAt: null, pausedRemainingMs: null, lobbyRooms: 0, openTies: 0, endedAt: this.#now() });
+		this.#lobbyRoom.clear();
+	}
+
 	async #reset() {
 		this.#disarmTimer();
 		await this.#d.store.clearRounds(this.code);
@@ -675,6 +783,8 @@ export class Tournament {
 			timerEndsAt: null,
 			pausedRemainingMs: null,
 			final: false,
+			totalStages: this.s.rules.stages,
+			closed: false,
 			openTies: 0,
 			podium: [],
 			winner: null,
@@ -692,7 +802,9 @@ export class Tournament {
 			.filter(([, p]) => p.status === 'lobby')
 			.sort(([ia, a], [ib, b]) => a.joinedAt - b.joinedAt || ia.localeCompare(ib));
 		const next = new Map<string, number>();
-		assignRooms(roster).forEach((room, i) => room.forEach(([id]) => next.set(id, i + 1)));
+		const rules = this.s.rules;
+		const rooms = roster.length ? (fitStages(roster.length, rules.stages, rules.advance, rules.roomSize)?.[0].sizes.length ?? 1) : 0;
+		assignRooms(roster, rooms).forEach((room, i) => room.forEach(([id]) => next.set(id, i + 1)));
 		for (const [id, room] of next) {
 			if (this.#lobbyRoom.get(id) !== room) {
 				this.#lobbyRoom.set(id, room);
@@ -700,7 +812,6 @@ export class Tournament {
 			}
 		}
 		for (const id of [...this.#lobbyRoom.keys()]) if (!next.has(id)) this.#lobbyRoom.delete(id);
-		const rooms = roomCount(roster.length);
 		if (rooms !== this.s.lobbyRooms) {
 			this.s.lobbyRooms = rooms;
 			this.#dirty.session = true;
@@ -710,9 +821,10 @@ export class Tournament {
 
 	// ── State changes (also queue saving and pushing) ────────────────────
 
-	#setBoard(b: Board, push = true) {
+	/** `save: false` for changes a restart can rebuild on its own (tiles turned over by the clock). */
+	#setBoard(b: Board, push = true, save = true) {
 		this.boards.set(b.roomId, b);
-		this.#dirty.boards.add(b.roomId);
+		if (save) this.#dirty.boards.add(b.roomId);
 		if (!push) return;
 		const msg = JSON.stringify({ t: 'board', b: boardView(b) } satisfies HeistServerMessage);
 		for (const id of Object.keys(b.players)) for (const peer of this.#playerPeers.get(id) ?? []) peer.send(msg);

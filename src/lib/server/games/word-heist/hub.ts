@@ -5,7 +5,7 @@ import { requireAdmin } from '$lib/server/admin-session';
 import { HEIST_SOCKET_PATH, type HeistClientMessage, type HeistErrorCode, type HeistServerMessage } from '$lib/games/word-heist/protocol';
 import { CODE_RE, type HeistControl, type HeistRules, type ModerationConfig } from '$lib/games/word-heist/types';
 import { defaultModeration } from './moderation';
-import { depsFor, loadModeration, newCode, startersFor } from './service';
+import { depsFor, loadModeration, newCode } from './service';
 import { FirestoreHeistStore, type HeistStore } from './store';
 import { HeistError, Tournament, type Peer } from './tournament';
 
@@ -96,7 +96,7 @@ export class HeistHub {
 	}
 
 	#tdeps() {
-		return { store: this.d.store, deps: () => depsFor(this.#config), starters: () => startersFor(this.#config) };
+		return { store: this.d.store, deps: () => depsFor(this.#config) };
 	}
 
 	/** Organiser: open a new tournament. */
@@ -225,7 +225,7 @@ export class HeistHub {
 				if (!t) return;
 				if (++c.joins > JOINS_PER_SOCKET) return fail(c, 'rate_limited', 'Too many attempts. Reload the page and try again.');
 				try {
-					const id = await t.join(msg.name);
+					const id = await t.join(msg.name, msg.avatar);
 					c.playerId = id.playerId;
 					send(c, { t: 'joined', ...id });
 					t.bindPlayer(c.peer, id.playerId);
@@ -239,15 +239,13 @@ export class HeistHub {
 				const t = c.t;
 				const requestId = typeof msg.requestId === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(msg.requestId) ? msg.requestId : '';
 				if (!t || !c.playerId) return fail(c, 'auth', 'Join the tournament first.');
-				if (!requestId || (msg.kind !== 'create' && msg.kind !== 'steal')) return fail(c, 'bad_request', 'Invalid move.');
+				if (!requestId) return fail(c, 'bad_request', 'Invalid move.');
 				const now = Date.now();
 				c.moves = c.moves.filter((m) => now - m < 2000);
 				if (c.moves.length >= MOVES_PER_2S) return send(c, { t: 'move', requestId, result: { ok: false, message: 'Slow down a little.' } });
 				c.moves.push(now);
-				const sourceId = typeof msg.sourceId === 'string' && /^w\d{1,7}$/.test(msg.sourceId) ? msg.sourceId : undefined;
-				if (msg.kind === 'steal' && !sourceId) return send(c, { t: 'move', requestId, result: { ok: false, message: 'Pick a word to steal first.' } });
 				const text = typeof msg.text === 'string' ? msg.text.slice(0, 60) : '';
-				return send(c, { t: 'move', requestId, result: t.move(c.playerId, { requestId, kind: msg.kind, text, sourceId }) });
+				return send(c, { t: 'move', requestId, result: t.move(c.playerId, { requestId, text }) });
 			}
 			case 'admin': {
 				const t = await this.#enter(c, msg.code);
