@@ -39,6 +39,9 @@
 		type HeistRules,
 		type HeistSession
 	} from '$lib/games/word-heist/types';
+	import { createSession as createScribbleSession } from '$lib/games/scribble/api';
+	import { DRAW_SECONDS, TURN_COUNTS, type DrawSession } from '$lib/games/scribble/types';
+	import { PACKS, buildPool, parseCustomWords, type PackId } from '$lib/games/scribble/words';
 	import { formatTimestamp } from '$lib/utils/format';
 	import PageHeader from '$lib/components/admin/PageHeader.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -53,7 +56,7 @@
 	import GradientOrb from '$lib/components/motion/GradientOrb.svelte';
 	import SessionStatusBadge from '$lib/components/games/SessionStatusBadge.svelte';
 
-	type AnySession = LiveSession | FlapSession | HeistSession;
+	type AnySession = LiveSession | FlapSession | HeistSession | DrawSession;
 	let sessions = $state<AnySession[]>([]);
 	let status = $state<'loading' | 'ready' | 'error'>('loading');
 	let attempt = $state(0);
@@ -232,12 +235,25 @@
 		})
 	);
 	const range = (lo: number, hi: number) => Array.from({ length: hi - lo + 1 }, (_, i) => lo + i);
+	let drawSeconds = $state<number>(80);
+	let drawTurns = $state<number>(8);
+	let drawPacks = $state<PackId[]>(['everyday', 'tech']);
+	let customWords = $state('');
 	let creating = $state(false);
 	let createError = $state('');
 
 	const wordCount = $derived(questionMode === 'random' ? QUESTIONS_PER_GAME : fixedQuestions.length);
-	// Only Tech Word Rush has a question set to get right first.
-	const blocked = $derived(startFor === 'word-heist' ? !!heistProblem : !isFlyGame(startFor) && !!questionProblem);
+	const customCount = $derived(parseCustomWords(customWords).length);
+	const drawPool = $derived(buildPool(drawPacks, parseCustomWords(customWords)).length);
+	const drawProblem = $derived(drawPool < 10 ? 'Pick a word pack, or add at least 10 words of your own.' : '');
+	// Tech Word Rush needs a valid question set, Word Heist sensible rules, Scribble enough words.
+	const blocked = $derived(
+		startFor === 'word-heist' ? !!heistProblem : startFor === 'scribble' ? !!drawProblem : !isFlyGame(startFor) && !!questionProblem
+	);
+
+	function togglePack(id: PackId) {
+		drawPacks = drawPacks.includes(id) ? drawPacks.filter((p) => p !== id) : [...drawPacks, id];
+	}
 
 	function openStart(id: string) {
 		startFor = id;
@@ -246,8 +262,8 @@
 
 	async function start() {
 		if (blocked) {
-			// Word Heist problems are already shown beside their boxes.
-			createError = startFor === 'word-heist' ? '' : questionProblem;
+			// Word Heist problems are already shown beside their boxes; Scribble's word packs need a message here.
+			createError = startFor === 'word-heist' ? '' : startFor === 'scribble' ? drawProblem : questionProblem;
 			return;
 		}
 		creating = true;
@@ -261,6 +277,9 @@
 			} else if (isFlyGame(startFor)) {
 				const { code } = await createFlappySession(token, Number(flapDuration), startFor);
 				await goto(presenterHref(startFor, code));
+			} else if (startFor === 'scribble') {
+				const { code } = await createScribbleSession(token, { drawSeconds, turns: drawTurns, packs: drawPacks, custom: customWords });
+				await goto(presenterHref('scribble', code));
 			} else {
 				const { code } = await createSession(token, duration, questionMode === 'random' ? undefined : fixedQuestions);
 				await goto(presenterHref('tech-word-rush', code));
@@ -346,6 +365,16 @@
 										</div>
 									{/each}
 								</div>
+							{:else if game.id === 'scribble'}
+								<svg viewBox="0 0 160 80" class="absolute -top-2 right-0 h-28 w-auto" aria-hidden="true">
+									<rect x="58" y="6" width="96" height="68" rx="8" fill="#fff" class="transition-transform duration-500 group-hover:-rotate-2" style="transform-origin: 106px 40px" />
+									<path d="M72 58 C 80 26, 98 20, 108 40 S 130 62, 142 24" fill="none" stroke="#2563eb" stroke-width="4" stroke-linecap="round" />
+									<circle cx="84" cy="26" r="7" fill="#facc15" />
+									<path d="M112 60 l9 -15 l9 15z" fill="#ef4444" />
+									<g transform="translate(46 50) rotate(35)" class="transition-transform duration-500 group-hover:translate-x-1">
+										<rect x="-4" y="-30" width="8" height="26" rx="1.5" fill="#f0c45c" /><path d="M-4 -4 L0 4 L4 -4Z" fill="#fcd5b5" /><rect x="-4" y="-34" width="8" height="5" rx="1.5" fill="#ec4899" />
+									</g>
+								</svg>
 							{:else if game.id === 'flappy'}
 								<svg viewBox="0 0 160 70" class="absolute -top-1 right-0 h-28 w-auto" aria-hidden="true">
 									<defs>
@@ -440,6 +469,8 @@
 						<span class="text-xs text-muted-foreground tabular">
 							{#if s.gameType === 'word-heist'}
 								{s.round === 0 ? 'Registration' : s.final ? 'Final' : `Round ${s.round} · ${s.roomCount} rooms`}
+							{:else if s.gameType === 'scribble'}
+								{s.status === 'lobby' ? `${s.totalTurns} turns` : `Turn ${Math.max(1, s.drawCount)} / ${s.totalTurns}`}
 							{:else if s.gameType !== 'tech-word-rush'}
 								{s.status === 'lobby' ? `${durationLabel(s.duration)} window` : 'Flights live'}
 							{:else}
@@ -516,7 +547,7 @@
 
 <Modal
 	open={startOpen}
-	size={isFlyGame(startFor) || startFor === 'word-heist' ? 'md' : 'lg'}
+	size={isFlyGame(startFor) || startFor === 'word-heist' || startFor === 'scribble' ? 'md' : 'lg'}
 	title="Start {startFor ? gameName(startFor) : ''}"
 	description="Opens a lobby with a QR code for players to join."
 	onclose={() => !creating && (startFor = null)}
@@ -644,6 +675,42 @@
 				<li>• The final leaderboard appears when the timer ends.</li>
 			</ul>
 			{#if createError}<p class="text-[13px] text-destructive" role="alert">{createError}</p>{/if}
+		</div>
+	{:else if startFor === 'scribble'}
+		<div class="space-y-5">
+			<Segmented label="Time to draw" bind:value={drawSeconds} options={DRAW_SECONDS.map((s) => ({ value: s, label: `${s} sec` }))} />
+			<Segmented label="Turns" bind:value={drawTurns} options={TURN_COUNTS.map((n) => ({ value: n, label: String(n) }))} />
+			<fieldset>
+				<legend class="text-[13px] font-medium text-foreground">Word packs</legend>
+				<div class="mt-1.5 grid gap-2 sm:grid-cols-3">
+					{#each PACKS as pack (pack.id)}
+						{@const on = drawPacks.includes(pack.id)}
+						<label class="flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 transition-colors {on ? 'border-ring bg-accent' : 'border-border hover:bg-muted'}">
+							<input type="checkbox" class="mt-0.5 accent-[var(--color-primary)]" checked={on} onchange={() => togglePack(pack.id)} />
+							<span>
+								<span class="block text-sm font-medium">{pack.name}</span>
+								<span class="block text-xs text-muted-foreground">{pack.description}</span>
+							</span>
+						</label>
+					{/each}
+				</div>
+			</fieldset>
+			<div>
+				<label for="custom-words" class="text-[13px] font-medium text-foreground">Your own words <span class="font-normal text-muted-foreground">(optional)</span></label>
+				<textarea
+					id="custom-words"
+					bind:value={customWords}
+					rows="3"
+					placeholder="symba, hackathon trophy, pitch deck…"
+					class="mt-1.5 w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none focus:border-ring focus:ring-4 focus:ring-ring/20"
+				></textarea>
+				<p class="mt-1 text-xs text-muted-foreground">Separate with commas or new lines. {customCount ? `${customCount} added.` : ''}</p>
+			</div>
+			<p class="rounded-md bg-muted px-3 py-2 text-[13px] text-muted-foreground">
+				<span class="font-semibold text-foreground tabular">{drawPool}</span> words ·
+				<span class="font-semibold text-foreground tabular">~{Math.ceil((drawTurns * (drawSeconds + 25)) / 60)} min</span> · needs 2+ players
+			</p>
+			{#if createError || drawProblem}<p class="text-[13px] text-destructive" role="alert">{createError || drawProblem}</p>{/if}
 		</div>
 	{:else}
 		<div class="space-y-5">

@@ -13,6 +13,7 @@
 	const isPresenter = $derived(
 		page.url.pathname.startsWith('/admin/games/tech-word-rush/live/') ||
 			page.url.pathname.startsWith('/admin/games/flappy/live/') ||
+			page.url.pathname.startsWith('/admin/games/scribble/live/') ||
 			/^\/admin\/live\/[^/]+\/present\/?$/.test(page.url.pathname)
 	);
 

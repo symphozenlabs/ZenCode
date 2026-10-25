@@ -166,6 +166,19 @@ service cloud.firestore {
       match /rounds/{roundId} {
         allow read, write: if isAdmin();
       }
+
+      // Scribble Showdown: each turn's drawing and guess feed are public, so
+      // every phone and the big screen can watch live. The server writes them;
+      // the word only reaches a turn doc once the turn is over.
+      match /turns/{turn} {
+        allow read: if true;
+        allow write: if isAdmin();
+
+        match /{feed}/{docId} {
+          allow read: if feed in ['strokes', 'guesses'];
+          allow write: if isAdmin() && feed in ['strokes', 'guesses'];
+        }
+      }
     }
 
     // Game settings (Word Heist moderation blocklist). Organisers only; the
