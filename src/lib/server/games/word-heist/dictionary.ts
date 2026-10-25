@@ -4,9 +4,6 @@
  * recommended size for spell checking (~79k words). Only plain a–z words are
  * kept (no accents, abbreviations or proper nouns).
  *
- * Starter words come from the most common sizes (10 and 20) only, so every
- * player opens with familiar words.
- *
  * SCOWL is Copyright 2000-2016 Kevin Atkinson and contributors, used under its
  * permissive licence — see node_modules/wordlist-english/Copyright.
  */
@@ -31,7 +28,6 @@ import b40 from 'wordlist-english/british-words-40.json';
 import b50 from 'wordlist-english/british-words-50.json';
 import b55 from 'wordlist-english/british-words-55.json';
 import b60 from 'wordlist-english/british-words-60.json';
-import { STARTER_LENGTHS } from '$lib/games/word-heist/engine';
 
 const ALPHA = /^[a-z]+$/;
 
@@ -42,7 +38,6 @@ const toUpper = (lists: string[][]) => {
 };
 
 let words: Set<string> | null = null;
-let common: Set<string> | null = null;
 
 function dictionary() {
 	words ??= toUpper([e10, e20, e35, e40, e50, e55, e60, a10, a20, a35, a40, a50, a55, a60, b10, b20, b35, b40, b50, b55, b60]);
@@ -53,18 +48,3 @@ function dictionary() {
 export const isWord = (w: string) => dictionary().has(w);
 
 export const dictionarySize = () => dictionary().size;
-
-/**
- * Common words by length for starters. Words ending in S are left out so
- * starters are base forms (plural-only steals are not allowed anyway).
- */
-export function starterPools(allowed: (w: string) => boolean): Record<number, string[]> {
-	common ??= toUpper([e10, e20]);
-	const pools: Record<number, string[]> = {};
-	for (const len of STARTER_LENGTHS) pools[len] = [];
-	for (const w of common) {
-		if (pools[w.length] && !w.endsWith('S') && allowed(w)) pools[w.length].push(w);
-	}
-	for (const len of STARTER_LENGTHS) pools[len].sort();
-	return pools;
-}

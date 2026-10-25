@@ -1,6 +1,6 @@
 import {
 	FEED_SIZE,
-	STARTERS_PER_PLAYER,
+	OPENING_TILES,
 	type Board,
 	type BoardWord,
 	type CutoffTie,
@@ -10,14 +10,20 @@ import {
 	type MoveResult,
 	type PlayerScore,
 	type RankEntry,
-	type RoomResult
+	type RoomResult,
+	type Tile,
+	type TilePlan
 } from './types';
 
 /**
- * Word Heist rules. Pure: the server runs these inside a Firestore
- * transaction on the room's board, and the tests run them directly. The
- * browser only uses the letter helpers (to show which letters are still
- * needed) — every decision is made on the server.
+ * Word Heist rules (modelled on Merriam-Webster's Pilfer). Pure: the live
+ * server runs these on a room's board in one synchronous step, and the tests
+ * run them directly. The browser only uses the clock and letter helpers for
+ * display — every decision is made on the server.
+ *
+ * Letter tiles drop into a shared row one at a time. A player types a word:
+ * it either steals a word on the board (every letter of it, plus at least one
+ * tile from the row) or is made from tiles alone. Tiles used leave the row.
  */
 
 // ── Words and letters ────────────────────────────────────────────────────
@@ -56,33 +62,91 @@ export function letterDiff(source: string, candidate: string): { missing: string
 	return { missing, added };
 }
 
-const VOWELS = new Set(['A', 'E', 'I', 'O', 'U']);
+/**
+ * Pilfer's one exception: a word can't be stolen just by adding S to the end
+ * (PAT → PATS). Using the S to rearrange is fine (PAT → PAST, TAPS).
+ */
+export const isJustS = (source: string, candidate: string) => candidate === source + 'S';
+
+/** The oldest tiles in `pool` spelling `letters` (any order), or null if the row doesn't have them. */
+export function takeTiles(pool: readonly Tile[], letters: readonly string[]): Tile[] | null {
+	const used = new Set<number>();
+	const out: Tile[] = [];
+	for (const c of letters) {
+		const t = pool.find((p) => p.c === c && !used.has(p.id));
+		if (!t) return null;
+		used.add(t.id);
+		out.push(t);
+	}
+	return out;
+}
+
+// ── Tiles and the round clock ────────────────────────────────────────────
 
 /**
- * Regular English plural spellings of a noun (conservative). Irregular
- * plurals (MAN → MEN, MOUSE → MICE) drop a source letter, so they already
- * fail as steals.
+ * Letter mix per 100 tiles, close to English letter frequency (about 40%
+ * vowels). A bag of any size is scaled from it.
  */
-export function pluralForms(word: string): string[] {
-	const w = word.toUpperCase();
-	const forms = new Set<string>();
-	if (/(S|X|Z|CH|SH)$/.test(w)) forms.add(w + 'ES');
-	else forms.add(w + 'S');
-	if (w.endsWith('Y') && w.length > 1 && !VOWELS.has(w[w.length - 2])) forms.add(w.slice(0, -1) + 'IES');
-	if (w.endsWith('O')) forms.add(w + 'ES');
-	if (w.endsWith('F')) forms.add(w.slice(0, -1) + 'VES');
-	if (w.endsWith('FE')) forms.add(w.slice(0, -2) + 'VES');
-	return [...forms];
+export const LETTER_WEIGHTS: Record<string, number> = {
+	A: 8, B: 2, C: 3, D: 4, E: 12, F: 2, G: 3, H: 3, I: 8, J: 1, K: 1, L: 5, M: 3,
+	N: 6, O: 7, P: 2, Q: 1, R: 6, S: 5, T: 7, U: 4, V: 1, W: 2, X: 1, Y: 2, Z: 1
+};
+
+/** A shuffled bag of `count` tiles in LETTER_WEIGHTS proportions. Same `random` → same bag. */
+export function makeBag(count: number, random: () => number): string {
+	const total = Object.values(LETTER_WEIGHTS).reduce((a, b) => a + b, 0);
+	const shares = Object.entries(LETTER_WEIGHTS).map(([c, w]) => {
+		const exact = (w * count) / total;
+		return { c, n: Math.floor(exact), rest: exact - Math.floor(exact) };
+	});
+	// Largest remainders get the tiles rounding left over.
+	let left = count - shares.reduce((a, s) => a + s.n, 0);
+	for (const s of [...shares].sort((a, b) => b.rest - a.rest || a.c.localeCompare(b.c))) {
+		if (left-- <= 0) break;
+		s.n++;
+	}
+	const tiles = shares.flatMap((s) => Array<string>(s.n).fill(s.c));
+	for (let i = tiles.length - 1; i > 0; i--) {
+		const j = Math.floor(random() * (i + 1));
+		[tiles[i], tiles[j]] = [tiles[j], tiles[i]];
+	}
+	return tiles.join('');
+}
+
+/** Tiles that should be face up after `elapsedMs` of play (pauses excluded). */
+export const tilesDue = (plan: TilePlan, elapsedMs: number) => Math.min(plan.count, OPENING_TILES + Math.max(0, Math.floor(elapsedMs / plan.everyMs)));
+
+export interface RoundClock {
+	/** Tiles face up by now. */
+	drawn: number;
+	tilesLeft: number;
+	/** When the next tile drops (null once the bag is empty or the clock is stopped). */
+	nextTileAt: number | null;
+	/** Time left in the round. */
+	remainingMs: number;
+	/** The bag is empty: this is the final countdown. */
+	finalCountdown: boolean;
 }
 
 /**
- * True when `candidate` is just the plural of `source`: it must be one of the
- * source's regular plural spellings AND be a dictionary word. This rejects
- * CAT → CATS, BOX → BOXES and BERRY → BERRIES, but not every word ending in
- * S: CAT → ACTS is a real rearrangement and is allowed.
+ * Where a round stands at `now`, from when it ends (`endsAt`, while running)
+ * or the time that was left (`pausedRemainingMs`, while paused).
  */
-export function isPluralOf(source: string, candidate: string, isWord: (w: string) => boolean): boolean {
-	return pluralForms(source).includes(candidate) && isWord(candidate);
+export function roundClock(plan: TilePlan, endsAt: number | null, pausedRemainingMs: number | null, now: number): RoundClock {
+	const remainingMs = Math.max(0, endsAt !== null ? endsAt - now : (pausedRemainingMs ?? plan.totalMs));
+	const drawn = tilesDue(plan, plan.totalMs - remainingMs);
+	const nextTileAt = endsAt !== null && drawn < plan.count ? Math.ceil(endsAt - plan.totalMs + (drawn - OPENING_TILES + 1) * plan.everyMs) : null;
+	return { drawn, tilesLeft: plan.count - drawn, nextTileAt, remainingMs, finalCountdown: drawn >= plan.count };
+}
+
+/** Turn over the tiles that are due by `now`. Returns null when nothing changed. Never mutates. */
+export function revealTiles(board: Board, now: number): Board | null {
+	if (board.status !== 'playing' || board.endsAt === null) return null;
+	const due = Math.min(board.bag.length, roundClock(board.tiles, board.endsAt, null, now).drawn);
+	if (due <= board.drawn) return null;
+	const fresh: Tile[] = [];
+	for (let i = board.drawn; i < due; i++) fresh.push({ id: i, c: board.bag[i] });
+	return { ...board, drawn: due, pool: [...board.pool, ...fresh] };
 }
 
 // ── Moves ────────────────────────────────────────────────────────────────
@@ -98,38 +162,60 @@ export interface MoveDeps {
 export interface MoveRequest {
 	requestId: string;
 	playerId: string;
-	kind: 'create' | 'steal';
 	text: string;
-	/** steal: id of the word on the board being taken. */
-	sourceId?: string;
 }
 
 export const REQUESTS_KEPT = 300;
 
-/** Checks that don't need the board (done before a transaction is opened). */
-export function precheck(kind: 'create' | 'steal', raw: unknown, rules: HeistRules, deps: MoveDeps): { word: string } | { message: string } {
+/** Checks that don't need the board: spelling, length, moderation, dictionary. */
+export function precheck(raw: unknown, rules: Pick<HeistRules, 'minWordLength'>, deps: MoveDeps): { word: string } | { message: string } {
 	const screened = typeof raw === 'string' ? deps.screen?.(raw.slice(0, 60)) : null;
 	if (screened) return { message: screened };
 	const word = normalizeWord(raw);
 	if (!word) return { message: 'Use letters A–Z only.' };
 	if (word.length < rules.minWordLength) return { message: `Words need at least ${rules.minWordLength} letters.` };
-	if (kind === 'create' && word.length > rules.maxCreateLength) {
-		return { message: `New words can be at most ${rules.maxCreateLength} letters — steal a word to go longer.` };
-	}
-	if (word.length > rules.maxWordLength) return { message: `Words can be at most ${rules.maxWordLength} letters.` };
 	const blocked = deps.moderate(word);
 	if (blocked) return { message: blocked };
 	if (!deps.isWord(word)) return { message: `${word} isn't in the dictionary.` };
 	return { word };
 }
 
-const clone = (b: Board): Board => structuredClone(b);
+export type MovePlan = { sourceId: string | null; tiles: Tile[] } | { message: string };
 
-function longestOwned(words: Record<string, BoardWord>, owner: string) {
-	let n = 0;
-	for (const w of Object.values(words)) if (w.owner === owner && w.text.length > n) n = w.text.length;
-	return n;
+/**
+ * Work out how `word` can be played on this board. A steal is tried first —
+ * other players' words before your own, longer words first — then making it
+ * from tiles alone. Each steal keeps every letter of its source and takes the
+ * rest from the tile row.
+ */
+export function planMove(board: Pick<Board, 'words' | 'pool'>, word: string, playerId: string): MovePlan {
+	const sources = Object.entries(board.words).sort(
+		([ia, a], [ib, b]) => Number(a.owner === playerId) - Number(b.owner === playerId) || b.text.length - a.text.length || ia.localeCompare(ib, undefined, { numeric: true })
+	);
+	let justS: string | null = null;
+	let rearranged: string | null = null;
+	for (const [id, w] of sources) {
+		const { missing, added } = letterDiff(w.text, word);
+		if (missing.length) continue;
+		if (!added.length) {
+			rearranged ??= w.text;
+			continue;
+		}
+		if (isJustS(w.text, word)) {
+			justS ??= w.text;
+			continue;
+		}
+		const tiles = takeTiles(board.pool, added);
+		if (tiles) return { sourceId: id, tiles };
+	}
+	const tiles = takeTiles(board.pool, [...word]);
+	if (tiles) return { sourceId: null, tiles };
+	if (justS) return { message: `You can't steal ${justS} just by adding S — rearrange it into a new word.` };
+	if (rearranged) return { message: `${word} only rearranges ${rearranged} — add at least one tile.` };
+	return { message: `Letters not available for ${word}.` };
 }
+
+const clone = (b: Board): Board => structuredClone(b);
 
 const reject = (message: string): { board: null; result: MoveResult } => ({ board: null, result: { ok: false, message } });
 
@@ -139,7 +225,7 @@ const reject = (message: string): { board: null; result: MoveResult } => ({ boar
  *
  * Ownership and score change together: a steal removes the source word and its
  * points from the previous owner and adds the new word and its points to the
- * thief, in the same document write.
+ * thief, in the same step. Tiles used leave the row.
  */
 export function applyMove(board: Board, move: MoveRequest, now: number, deps: MoveDeps): { board: Board | null; result: MoveResult } {
 	const seen = board.requests[move.requestId];
@@ -150,47 +236,38 @@ export function applyMove(board: Board, move: MoveRequest, now: number, deps: Mo
 	const me = board.players[move.playerId];
 	if (!me || me.removed) return reject("You're not playing in this room.");
 
-	const pre = precheck(move.kind, move.text, board.rules, deps);
+	const pre = precheck(move.text, board.rules, deps);
 	if ('message' in pre) return reject(pre.message);
 	const word = pre.word;
 
-	const active = Object.values(board.words);
-	if (active.some((w) => w.text === word)) return reject(`${word} is already on the board.`);
+	if (Object.values(board.words).some((w) => w.text === word)) return reject(`${word} is already on the board.`);
 
-	let kind: MoveKind = 'create';
-	let source: BoardWord | undefined;
-	if (move.kind === 'steal') {
-		source = move.sourceId ? board.words[move.sourceId] : undefined;
-		if (!source) return reject('That word just changed hands — pick it again.');
-		if (isPluralOf(source.text, word, deps.isWord)) return reject(`${word} is just the plural of ${source.text}.`);
-		const { missing, added } = letterDiff(source.text, word);
-		if (missing.length) return reject(`Keep every letter of ${source.text} (missing ${missing.join(', ')}).`);
-		if (!added.length) return reject(`Add at least one letter to ${source.text}.`);
-		kind = source.owner === move.playerId ? 'extend' : 'steal';
-	}
+	const plan = planMove(board, word, move.playerId);
+	if ('message' in plan) return reject(plan.message);
+	const source = plan.sourceId ? board.words[plan.sourceId] : undefined;
+	const kind: MoveKind = !source ? 'create' : source.owner === move.playerId ? 'extend' : 'steal';
 
 	const next = clone(board);
 	next.seq += 1;
 	const seq = next.seq;
 	const victimId = source && kind === 'steal' ? source.owner : undefined;
 
-	if (source && move.sourceId) delete next.words[move.sourceId];
+	if (plan.sourceId) delete next.words[plan.sourceId];
 	next.words[`w${seq}`] = { text: word, owner: move.playerId, at: now, ...(source ? { from: source.text } : {}) };
+	const used = new Set(plan.tiles.map((t) => t.id));
+	next.pool = next.pool.filter((t) => !used.has(t.id));
 
 	const mine = next.players[move.playerId];
 	const gained = word.length - (kind === 'extend' && source ? source.text.length : 0);
 	mine.score += gained;
-	mine.lastScoreAt = now;
 	if (kind === 'steal') mine.steals += 1;
-	mine.longest = longestOwned(next.words, move.playerId);
-
+	if (word.length > mine.longest) {
+		mine.longest = word.length;
+		mine.longestAt = now;
+	}
 	if (victimId && source) {
 		const victim = next.players[victimId];
-		if (victim) {
-			victim.score -= source.text.length;
-			victim.lastScoreAt = now;
-			victim.longest = longestOwned(next.words, victimId);
-		}
+		if (victim) victim.score -= source.text.length;
 	}
 
 	const entry: FeedEntry = {
@@ -222,7 +299,7 @@ export function removeFromBoard(board: Board, playerId: string): Board | null {
 	if (!p || p.removed) return null;
 	const next = clone(board);
 	for (const [id, w] of Object.entries(next.words)) if (w.owner === playerId) delete next.words[id];
-	next.players[playerId] = { ...p, removed: true, score: 0, longest: 0 };
+	next.players[playerId] = { ...p, removed: true, score: 0, longest: 0, longestAt: 0 };
 	return next;
 }
 
@@ -237,39 +314,33 @@ export function scoresFromWords(board: Board): Record<string, number> {
 // ── Ranking and qualification ────────────────────────────────────────────
 
 /**
- * Leaderboard order (documented tie-break policy):
+ * Leaderboard order (Pilfer's tie-break):
  *   1. higher score
- *   2. longer longest word currently owned
- *   3. more successful steals
- *   4. earlier time the score last changed (reached it first)
- * Players equal on all four share a rank. Name and id only fix the display
+ *   2. longer longest word made this round
+ *   3. made that word first
+ * Players equal on all three share a rank. Name and id only fix the display
  * order between them — they never decide a qualification.
  */
-const tieKey = (p: PlayerScore) => `${p.score}|${p.longest}|${p.steals}|${p.lastScoreAt}`;
+const tieKey = (p: PlayerScore) => `${p.score}|${p.longest}|${p.longestAt ?? 0}`;
 
 export function rankBoard(board: Pick<Board, 'players'>): RankEntry[] {
 	const list = Object.entries(board.players)
 		.filter(([, p]) => !p.removed)
 		.sort(
 			([ia, a], [ib, b]) =>
-				b.score - a.score ||
-				b.longest - a.longest ||
-				b.steals - a.steals ||
-				a.lastScoreAt - b.lastScoreAt ||
-				a.name.localeCompare(b.name) ||
-				ia.localeCompare(ib)
+				b.score - a.score || b.longest - a.longest || (a.longestAt ?? 0) - (b.longestAt ?? 0) || a.name.localeCompare(b.name) || ia.localeCompare(ib)
 		);
 	const out: RankEntry[] = [];
 	list.forEach(([playerId, p], i) => {
 		const prev = i > 0 ? list[i - 1][1] : null;
 		const rank = prev && tieKey(prev) === tieKey(p) ? out[i - 1].rank : i + 1;
-		out.push({ playerId, name: p.name, score: p.score, longest: p.longest, steals: p.steals, lastScoreAt: p.lastScoreAt, rank });
+		out.push({ playerId, name: p.name, score: p.score, longest: p.longest, longestAt: p.longestAt ?? 0, steals: p.steals, rank });
 	});
 	return out;
 }
 
-/** Places that matter: top 2 advance from a qualifying room; the final decides 1st–3rd. */
-export const placesFor = (final: boolean) => (final ? 3 : 2);
+/** Places that matter: the podium (1st–3rd) in the final, else the players who go through. */
+export const placesFor = (final: boolean, advance: number) => (final ? 3 : advance);
 
 /**
  * Turn a finished room's ranking into its result. A group of fully tied
@@ -277,9 +348,9 @@ export const placesFor = (final: boolean) => (final ? 3 : 2);
  * organiser to decide; it is never settled silently. `resolved[i]` is the
  * organiser's pick for the i-th tie, if already made.
  */
-export function roomResult(roomId: string, number: number, ranking: RankEntry[], final: boolean, resolved: (string[] | null)[] = []): RoomResult {
-	const cap = Math.min(placesFor(final), ranking.length);
-	const boundaries = final ? [1, 2, 3] : [placesFor(false)];
+export function roomResult(roomId: string, number: number, ranking: RankEntry[], places: number, final: boolean, resolved: (string[] | null)[] = []): RoomResult {
+	const cap = Math.min(places, ranking.length);
+	const boundaries = final ? Array.from({ length: places }, (_, i) => i + 1) : [places];
 	const ties: CutoffTie[] = [];
 	for (const [start, end] of tieGroups(ranking)) {
 		if (end - start > 1 && boundaries.some((b) => start < b && b < end && b <= cap)) {
@@ -326,7 +397,7 @@ function decideAdvancing(ranking: RankEntry[], cap: number, ties: CutoffTie[]): 
 }
 
 /** Validate an organiser's pick for one tie and return the updated result. */
-export function resolveTie(result: RoomResult, tieIndex: number, picks: unknown, final: boolean): RoomResult | string {
+export function resolveTie(result: RoomResult, tieIndex: number, picks: unknown, places: number): RoomResult | string {
 	const tie = result.ties[tieIndex];
 	if (!tie) return 'There is no tie to decide here.';
 	if (!Array.isArray(picks) || picks.some((p) => typeof p !== 'string')) return 'Choose the players who take the tied places.';
@@ -335,7 +406,7 @@ export function resolveTie(result: RoomResult, tieIndex: number, picks: unknown,
 	if (list.length !== tie.slots) return `Pick exactly ${tie.slots} player${tie.slots === 1 ? '' : 's'}.`;
 	if (!list.every((p) => tie.candidates.includes(p))) return 'Pick only from the tied players.';
 	const ties = result.ties.map((t, i) => (i === tieIndex ? { ...t, resolved: list } : t));
-	const cap = Math.min(placesFor(final), result.ranking.length);
+	const cap = Math.min(places, result.ranking.length);
 	return { ...result, ties, advancing: decideAdvancing(result.ranking, cap, ties) };
 }
 
@@ -358,9 +429,9 @@ export function nextRoster(rooms: RoomResult[]): string[] {
 	return seeds.map((s) => s.id);
 }
 
-// ── Starter words ────────────────────────────────────────────────────────
+// ── New boards ───────────────────────────────────────────────────────────
 
-/** Seeded PRNG (mulberry32): the same seed always deals the same words. */
+/** Seeded PRNG (mulberry32): the same seed always gives the same bag. */
 export function rng(seed: number): () => number {
 	let a = seed >>> 0;
 	return () => {
@@ -372,55 +443,20 @@ export function rng(seed: number): () => number {
 	};
 }
 
-/** Word lengths every player starts with: one of each, so everyone opens on the same score. */
-export const STARTER_LENGTHS = [3, 4, 5] as const;
-
-/**
- * Deal STARTERS_PER_PLAYER words to each player: one 3-, one 4- and one
- * 5-letter word (12 points each), no word twice in a room.
- */
-export function dealStarters(playerIds: readonly string[], pools: Record<number, readonly string[]>, random: () => number): Record<string, string[]> {
-	const decks = new Map<number, string[]>();
-	for (const len of STARTER_LENGTHS) {
-		const deck = [...new Set(pools[len] ?? [])];
-		for (let i = deck.length - 1; i > 0; i--) {
-			const j = Math.floor(random() * (i + 1));
-			[deck[i], deck[j]] = [deck[j], deck[i]];
-		}
-		if (deck.length < playerIds.length) throw new Error(`Not enough ${len}-letter starter words.`);
-		decks.set(len, deck);
-	}
-	const out: Record<string, string[]> = {};
-	playerIds.forEach((id, i) => {
-		out[id] = STARTER_LENGTHS.slice(0, STARTERS_PER_PLAYER).map((len) => decks.get(len)![i]);
-	});
-	return out;
-}
-
-/** A fresh board for a room, starter words already owned. */
+/** A fresh board for a room: everyone on 0, no tiles turned over yet. */
 export function newBoard(params: {
 	round: number;
 	roomId: string;
 	number: number;
 	rules: HeistRules;
-	players: { id: string; name: string }[];
-	starters: Record<string, string[]>;
-	now: number;
+	tiles: TilePlan;
+	players: { id: string; name: string; avatar?: number }[];
+	bag: string;
 }): Board {
 	const players: Record<string, PlayerScore> = {};
-	const words: Record<string, BoardWord> = {};
-	let seq = 0;
-	for (const p of params.players) {
-		const mine = params.starters[p.id] ?? [];
-		for (const text of mine) words[`w${++seq}`] = { text, owner: p.id, at: params.now, starter: true };
-		players[p.id] = {
-			name: p.name,
-			score: mine.reduce((n, w) => n + w.length, 0),
-			longest: mine.reduce((n, w) => Math.max(n, w.length), 0),
-			steals: 0,
-			lastScoreAt: params.now
-		};
-	}
+	params.players.forEach((p, seat) => {
+		players[p.id] = { name: p.name, score: 0, longest: 0, longestAt: 0, steals: 0, seat, avatar: p.avatar ?? 0 };
+	});
 	return {
 		round: params.round,
 		roomId: params.roomId,
@@ -429,11 +465,15 @@ export function newBoard(params: {
 		endsAt: null,
 		pausedRemainingMs: null,
 		rules: params.rules,
+		tiles: params.tiles,
+		bag: params.bag,
+		drawn: 0,
+		pool: [],
 		players,
-		words,
+		words: {},
 		feed: [],
-		seq,
-		startSeq: seq,
+		seq: 0,
+		startSeq: 0,
 		requests: {}
 	};
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { applyMove, newBoard, precheck } from '$lib/games/word-heist/engine';
-import { DEFAULT_BLOCKLIST, DEFAULT_RULES, type ModerationConfig } from '$lib/games/word-heist/types';
-import { dictionarySize, isWord, starterPools } from './dictionary';
+import { DEFAULT_BLOCKLIST, DEFAULT_RULES, tilePlan, type ModerationConfig } from '$lib/games/word-heist/types';
+import { dictionarySize, isWord } from './dictionary';
 import { BLOCKED_MESSAGE, defaultModeration, moderateWord, parseBlocklist, screenRaw } from './moderation';
 
 const config = defaultModeration();
@@ -54,8 +54,8 @@ describe('obfuscation', () => {
 	});
 
 	it('a disguised word is reported as blocked, not as a typo', () => {
-		expect(precheck('create', 's.e.x', DEFAULT_RULES, depsWith(config))).toEqual({ message: BLOCKED_MESSAGE });
-		expect(precheck('create', 's.e.x', DEFAULT_RULES, depsWith({ ...config, detectObfuscation: false }))).toEqual({ message: 'Use letters A–Z only.' });
+		expect(precheck('s.e.x', DEFAULT_RULES, depsWith(config))).toEqual({ message: BLOCKED_MESSAGE });
+		expect(precheck('s.e.x', DEFAULT_RULES, depsWith({ ...config, detectObfuscation: false }))).toEqual({ message: 'Use letters A–Z only.' });
 	});
 });
 
@@ -67,29 +67,20 @@ describe('dictionary (SCOWL)', () => {
 	it.each(['CARE', 'RACE', 'CRATER', 'CAT', 'BOXES', 'BERRIES', 'TRACE', 'WINNER'])('knows %s', (w) => expect(isWord(w)).toBe(true));
 	it.each(['XQZT', 'CRATERX', 'QI'])('rejects %s', (w) => expect(isWord(w)).toBe(false));
 
-	it('the brief’s examples work against the real dictionary', () => {
+	it('Pilfer’s examples work against the real dictionary', () => {
 		const deps = depsWith(config);
-		const b = newBoard({ round: 1, roomId: 'r', number: 1, rules: DEFAULT_RULES, players: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], starters: { a: ['CAT', 'BOX'], b: ['CARE', 'BERRY'] }, now: 0 });
-		const live = { ...b, status: 'playing' as const, endsAt: 10_000 };
-		const id = (t: string) => Object.entries(live.words).find(([, w]) => w.text === t)![0];
-		const steal = (from: string, to: string) => applyMove(live, { requestId: `r-${from}-${to}`, playerId: 'a', kind: 'steal', text: to, sourceId: id(from) }, 1, deps).result;
-		expect(steal('CARE', 'RACE')).toMatchObject({ ok: false });
-		expect(steal('CAT', 'CATS')).toMatchObject({ ok: false, message: expect.stringMatching(/plural/) });
-		expect(steal('BOX', 'BOXES')).toMatchObject({ ok: false, message: expect.stringMatching(/plural/) });
-		expect(steal('BERRY', 'BERRIES')).toMatchObject({ ok: false, message: expect.stringMatching(/plural/) });
-		expect(steal('CARE', 'CRATER')).toMatchObject({ ok: true, gained: 6 });
-		expect(steal('CAT', 'ACTS')).toMatchObject({ ok: true });
-	});
-
-	it('has enough clean, common starter words for any room', () => {
-		const pools = starterPools((w) => !moderateWord(w, config));
-		for (const len of [3, 4, 5]) {
-			expect(pools[len].length).toBeGreaterThan(100);
-			for (const w of pools[len]) {
-				expect(w).toHaveLength(len);
-				expect(isWord(w)).toBe(true);
-				expect(moderateWord(w, config)).toBeNull();
-			}
-		}
+		const b = newBoard({ round: 1, roomId: 'r', number: 1, rules: DEFAULT_RULES, tiles: tilePlan(2, DEFAULT_RULES), players: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], bag: '' });
+		const live = {
+			...b,
+			status: 'playing' as const,
+			endsAt: 10_000,
+			words: { w1: { text: 'TEA', owner: 'b', at: 0 }, w2: { text: 'PAT', owner: 'b', at: 0 }, w3: { text: 'CARE', owner: 'b', at: 0 } },
+			pool: [...'MSTR'].map((c, i) => ({ id: i, c }))
+		};
+		const play = (text: string) => applyMove(live, { requestId: `r-${text}`, playerId: 'a', text }, 1, deps).result;
+		for (const w of ['MATE', 'TEAM', 'MEAT', 'PAST', 'TAPS', 'CRATER']) expect(play(w)).toMatchObject({ ok: true });
+		expect(play('PATS')).toMatchObject({ ok: false, message: expect.stringMatching(/just by adding S/) });
+		expect(play('RACE')).toMatchObject({ ok: false });
+		expect(play('ZEBRA')).toMatchObject({ ok: false, message: expect.stringMatching(/Letters not available/) });
 	});
 });

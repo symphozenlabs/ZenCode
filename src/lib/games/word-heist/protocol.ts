@@ -10,7 +10,9 @@ import type {
 	PlayerStatus,
 	PodiumEntry,
 	RoomSummary,
-	RoundResult
+	RoundResult,
+	Tile,
+	TilePlan
 } from './types';
 
 /**
@@ -31,6 +33,12 @@ export interface TournamentView {
 	playerCount: number;
 	round: number;
 	final: boolean;
+	/** Stages this tournament will play (1 for a game). */
+	totalStages: number;
+	/** An organiser closed it before the end. */
+	closed: boolean;
+	/** A game's avatars already picked (a tournament checks per room when rooms are locked). */
+	takenAvatars: number[];
 	roomCount: number;
 	roundPlayers: number;
 	timerEndsAt: number | null;
@@ -51,9 +59,10 @@ export interface MeView {
 	place: number | null;
 	/** Provisional room while in the lobby. */
 	lobbyRoom: number | null;
+	avatar: number;
 }
 
-/** A room's board as sent to its players (no request ids). */
+/** A room's board as sent to its players (no request ids, and never the bag). */
 export interface BoardView {
 	round: number;
 	roomId: string;
@@ -62,6 +71,12 @@ export interface BoardView {
 	endsAt: number | null;
 	pausedRemainingMs: number | null;
 	rules: HeistRules;
+	/** How this room's tiles drop. */
+	tiles: TilePlan;
+	/** Tiles turned over so far. */
+	drawn: number;
+	/** Face-up tiles nobody has used yet, oldest first. */
+	pool: Tile[];
 	players: Record<string, PlayerScore>;
 	words: Record<string, BoardWord>;
 	feed: FeedEntry[];
@@ -77,12 +92,11 @@ export interface AdminPlayer {
 	connected: boolean;
 }
 
-export type MoveKind = 'create' | 'steal';
-
 export type HeistClientMessage =
 	| { t: 'hello'; code: string; playerId?: string; token?: string }
-	| { t: 'join'; code: string; name: string }
-	| { t: 'move'; requestId: string; kind: MoveKind; text: string; sourceId?: string }
+	| { t: 'join'; code: string; name: string; avatar?: number }
+	/** Just the word: the server works out whether it is a steal or made from tiles. */
+	| { t: 'move'; requestId: string; text: string }
 	| { t: 'admin'; code: string; token: string }
 	| { t: 'control'; reqId: string; action: HeistControl; [key: string]: unknown }
 	| { t: 'watch'; roomId: string | null };
