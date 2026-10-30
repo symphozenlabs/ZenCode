@@ -4,10 +4,9 @@ A real-time word-stealing game (inspired by Merriam-Webster's Pilfer), run eithe
 
 ## Creating a lobby
 
-**Admin → Games → Word Heist → Start live game** has two choices:
+**Admin → Games → Word Heist → Start live game** creates a **game**: one room, one round, 2–15 players (you choose the limit). The top three make the podium.
 
-- **Create game** — one room, one round, 2–15 players (you choose the limit). The top three make the podium.
-- **Create tournament** — set **participants**, **stages** (2–5, the final included), **players per room** (2–15, default 12) and **go through per room**:
+**Admin → Games → Tournament → Create tournament → Word Heist** creates a **tournament** (see also [tournaments.md](tournaments.md) for the other games): set **participants**, **stages** (2–5, the final included), **players per room** (2–15, default 12) and **go through per room**:
   - **Whatever you set stays as you set it** (the box is highlighted; its × frees it again). Only the boxes you haven't set are worked out, changing as few as possible: free participants become the most the plan takes (going up or down with stages, room size and players going through); with participants set, the stages, room size or players going through that you left free are chosen to fit them.
   - If the boxes you set can't work together, nothing is changed and the form says which ones clash and why (e.g. "1000 participants, 2 stages and rooms of 12 can't work together…").
   - The form lists every stage (players, rooms, how many go through) and refuses plans that can't work, saying why.

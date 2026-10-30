@@ -1,5 +1,6 @@
 import type { Guess, QuestionStatus, RankEntry } from './engine';
 import type { Category, Difficulty } from './questions';
+import type { TournamentTag } from '$lib/games/tournament/types';
 
 /**
  * Firestore shapes for a live Tech Word Rush session.
@@ -62,6 +63,8 @@ export interface LiveSession {
 	ranking?: boolean;
 	/** Server time scoring started; a run older than RANKING_LEASE_MS is presumed dead. */
 	rankingAt?: number;
+	/** Set when this session is one room of a tournament stage (players are seated by the tournament). */
+	tournament?: TournamentTag;
 }
 
 /**

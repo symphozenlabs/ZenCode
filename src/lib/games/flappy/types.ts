@@ -1,4 +1,5 @@
 import type { FlyGame } from './skins';
+import type { TournamentTag } from '$lib/games/tournament/types';
 
 /**
  * Firestore shapes for a Flappy Bird or Soar & Roar session (same game,
@@ -53,6 +54,8 @@ export interface FlapSession {
 	ranking?: boolean;
 	/** How many times the host restarted this code; phones clear their last flight when it changes. */
 	resets?: number;
+	/** Set when this session is one room of a tournament stage (players are seated by the tournament). */
+	tournament?: TournamentTag;
 }
 
 export interface FlapPlayer {

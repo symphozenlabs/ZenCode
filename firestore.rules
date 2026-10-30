@@ -167,6 +167,12 @@ service cloud.firestore {
         allow read, write: if isAdmin();
       }
 
+      // Tournaments (gameType 'tournament'): each stage's rankings and
+      // qualifiers, written by the server. Phones read their own player doc.
+      match /stages/{stageId} {
+        allow read, write: if isAdmin();
+      }
+
       // Scribble Showdown: each turn's drawing and guess feed are public, so
       // every phone and the big screen can watch live. The server writes them;
       // the word only reaches a turn doc once the turn is over.

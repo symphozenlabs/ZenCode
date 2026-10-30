@@ -61,6 +61,7 @@ import {
 	type WordOption
 } from '$lib/games/scribble/types';
 import { SESSIONS } from '$lib/games/tech-word-rush/types';
+import { ROOM_JOIN_MESSAGE, type SeatedPlayer, type TournamentTag } from '$lib/games/tournament/types';
 
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no I, L, O, 0, 1
 const MAX_PLAYERS = 300;
@@ -178,15 +179,43 @@ function newCode() {
 	return s;
 }
 
-export async function createSession(createdBy: string, body: Record<string, unknown>): Promise<{ code: string }> {
+/** The host's settings for a game, checked (400 with a plain message if wrong). Also used by tournaments. */
+export function parseDrawSettings(body: Record<string, unknown>) {
 	const drawSeconds = Number(body.drawSeconds);
 	const turns = Number(body.turns);
 	if (!DRAW_SECONDS.includes(drawSeconds as never)) error(400, 'Choose a valid drawing time.');
 	if (!TURN_COUNTS.includes(turns as never)) error(400, 'Choose how many turns to play.');
 	const packs: PackId[] = [...new Set(Array.isArray(body.packs) ? body.packs.filter(isPackId) : [])];
-	const custom = parseCustomWords(typeof body.custom === 'string' ? body.custom.slice(0, 8000) : '');
+	const customText = typeof body.custom === 'string' ? body.custom.slice(0, 8000) : '';
+	const custom = parseCustomWords(customText);
 	const pool = buildPool(packs, custom);
 	if (pool.length < MIN_POOL) error(400, `Pick a word pack, or add at least ${MIN_POOL} words of your own.`);
+	return { drawSeconds, turns, packs, custom, customText, pool };
+}
+
+/**
+ * A tournament seats its players in this session: the same ids and device
+ * tokens as in the tournament, so their phones carry straight on without
+ * joining again. Nobody else can join a tagged session. Scribble's own rules
+ * still apply: a phone that never checks in is removed when the game starts.
+ */
+export async function seedTournament(db: Firestore, code: string, tag: TournamentTag, members: readonly SeatedPlayer[]) {
+	const now = Date.now();
+	for (let i = 0; i < members.length; i += 120) {
+		const batch = writeBatch(db); // 3 writes a player, under Firestore's 500
+		for (const m of members.slice(i, i + 120)) {
+			const player: DrawPlayer = { name: m.name, joinedAt: m.joinedAt, score: 0, streak: 0, guessed: 0, drew: 0 };
+			batch.set(playerRef(db, code, m.id), player);
+			batch.set(stateRef(db, code, m.id), { tokenHash: m.tokenHash, lastSeen: now } satisfies PrivateState);
+			batch.set(doc(db, SESSIONS, code, 'names', sha256(m.name.toLowerCase())), { playerId: m.id });
+		}
+		await batch.commit();
+	}
+	await updateDoc(sessionRef(db, code), { tournament: tag, playerCount: members.length });
+}
+
+export async function createSession(createdBy: string, body: Record<string, unknown>): Promise<{ code: string }> {
+	const { drawSeconds, turns, packs, custom, pool } = parseDrawSettings(body);
 
 	const db = await adminDb();
 	for (let attempt = 0; attempt < 6; attempt++) {
@@ -583,6 +612,7 @@ export async function join(code: string, rawName: unknown) {
 	const db = await adminDb();
 	const s = sessionData(await getDoc(sessionRef(db, code)));
 	if (s.status === 'finished') error(410, 'This game has ended.');
+	if (s.tournament) error(403, ROOM_JOIN_MESSAGE);
 	// Counted rather than kept on the session doc: a join must not write the
 	// doc every phone is listening to (see flappy.ts).
 	if ((await countPlayers(db, code)) >= MAX_PLAYERS) error(409, 'This game is full.');

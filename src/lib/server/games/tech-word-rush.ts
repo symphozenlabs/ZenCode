@@ -46,6 +46,7 @@ import {
 	type PlayerView,
 	type QuestionStats
 } from '$lib/games/tech-word-rush/types';
+import { ROOM_JOIN_MESSAGE, type SeatedPlayer, type TournamentTag } from '$lib/games/tournament/types';
 
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no I, L, O, 0, 1
 const CODE_PATTERN = /^ZC[A-Z2-9]{4}$/;
@@ -113,6 +114,11 @@ function toQuestion(id: string, d: Record<string, unknown>): WordQuestion | null
 	return typeof q === 'string' ? null : q;
 }
 
+/** Valid questions in the organisers' bank (Firestore). */
+export async function loadBank(db: Firestore): Promise<WordQuestion[]> {
+	return (await getDocs(collection(db, QUESTIONS_COLLECTION))).docs.map((d) => toQuestion(d.id, d.data())).filter((q): q is WordQuestion => !!q);
+}
+
 /** The selected words never change during a session, so cache them per instance. */
 const wordCache = new Map<string, WordQuestion[]>();
 
@@ -151,9 +157,7 @@ export async function createSession(createdBy: string, duration: number, fixed?:
 		items = questions;
 		source = 'fixed';
 	} else {
-		const stored = (await getDocs(collection(db, QUESTIONS_COLLECTION))).docs
-			.map((d) => toQuestion(d.id, d.data()))
-			.filter((q): q is WordQuestion => !!q);
+		const stored = await loadBank(db);
 		items = pickQuestions(stored, DEFAULT_QUESTIONS);
 		if (items.length < QUESTIONS_PER_GAME) error(500, 'Not enough questions to start a game.');
 		source = stored.length >= QUESTIONS_PER_GAME ? 'bank' : stored.length ? 'bank+default' : 'default';
@@ -199,6 +203,25 @@ const sessionData = (snap: DocumentSnapshot) => {
 	if (!snap.exists()) error(404, 'This game session no longer exists.');
 	return snap.data() as LiveSession;
 };
+
+/**
+ * A tournament seats its players in this session: the same ids and device
+ * tokens as in the tournament, so their phones carry straight on without
+ * joining again. Nobody else can join a tagged session.
+ */
+export async function seedTournament(db: Firestore, code: string, tag: TournamentTag, members: readonly SeatedPlayer[]) {
+	for (let i = 0; i < members.length; i += 120) {
+		const batch = writeBatch(db); // 3 writes a player, under Firestore's 500
+		for (const m of members.slice(i, i + 120)) {
+			const player: PlayerDoc = { name: m.name, joinedAt: m.joinedAt, xp: 0, correct: 0, failed: 0, skipped: 0, hintsUsed: 0, q: null };
+			batch.set(playerRef(db, code, m.id), player);
+			batch.set(stateRef(db, code, m.id), { tokenHash: m.tokenHash, q: null } satisfies PrivateState);
+			batch.set(doc(db, SESSIONS, code, 'names', sha256(m.name.toLowerCase())), { playerId: m.id });
+		}
+		await batch.commit();
+	}
+	await updateDoc(sessionRef(db, code), { tournament: tag, playerCount: members.length });
+}
 
 /**
  * Runs once the answer is public: judge every player's guesses for the current
@@ -407,6 +430,7 @@ export async function join(code: string, rawName: unknown) {
 	const sRef = sessionRef(db, code);
 	const s = sessionData(await getDoc(sRef));
 	if (s.status === 'finished') error(410, 'This game has ended.');
+	if (s.tournament) error(403, ROOM_JOIN_MESSAGE);
 	if (s.playerCount >= MAX_PLAYERS) error(409, 'This game is full.');
 
 	const id = doc(collection(db, SESSIONS, code, 'players')).id;

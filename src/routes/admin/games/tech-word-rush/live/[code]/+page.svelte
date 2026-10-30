@@ -6,6 +6,7 @@
 	import { Users, X, Maximize, Minimize, Play, Eye, ListOrdered, SkipForward, Flag, Trophy, CloudOff, ArrowLeft } from '@lucide/svelte';
 	import { db } from '$lib/firebase/client';
 	import { adminAuth } from '$lib/stores/admin-auth.svelte';
+	import { presenterHref } from '$lib/games/registry';
 	import { control, serverNow } from '$lib/games/tech-word-rush/api';
 	import { MAX_GUESSES, maskWord } from '$lib/games/tech-word-rush/engine';
 	import { RANKING_LEASE_MS, SESSIONS, type ControlAction, type LiveSession, type PlayerDoc } from '$lib/games/tech-word-rush/types';
@@ -27,6 +28,7 @@
 
 	let session = $state<LiveSession | null>(null);
 	let loadState = $state<'loading' | 'ready' | 'missing' | 'error'>('loading');
+	/** A tournament room goes back to its tournament dashboard, a plain game to the Games page. */	const backHref = $derived(session?.tournament ? presenterHref('tournament', session.tournament.code) : '/admin/games');
 	let players = $state<(PlayerDoc & { id: string })[]>([]);
 
 	$effect(() => {
@@ -189,7 +191,7 @@
 			<button type="button" class="grid size-9 place-items-center rounded-md text-cream/70 hover:bg-white/10 hover:text-cream" aria-label={fullscreen ? 'Exit full screen' : 'Full screen'} onclick={toggleFullscreen}>
 				{#if fullscreen}<Minimize class="size-4" />{:else}<Maximize class="size-4" />{/if}
 			</button>
-			<a href="/admin/games" class="grid size-9 place-items-center rounded-md text-cream/70 hover:bg-white/10 hover:text-cream" aria-label="Close presenter">
+			<a href={backHref} class="grid size-9 place-items-center rounded-md text-cream/70 hover:bg-white/10 hover:text-cream" aria-label="Close presenter">
 				<X class="size-5" />
 			</a>
 		</div>
@@ -203,7 +205,7 @@
 				<CloudOff class="mx-auto size-10 text-cream/50" />
 				<p class="mt-4 text-xl font-semibold">{loadState === 'missing' ? 'This game session does not exist.' : 'Unable to load the game.'}</p>
 				<p class="mt-1 text-cream/60">{loadState === 'missing' ? 'It may have been removed.' : 'Check your connection, then reload.'}</p>
-				<Button variant="stage" class="mt-6" href="/admin/games"><ArrowLeft class="size-4" /> Back to games</Button>
+				<Button variant="stage" class="mt-6" href={backHref}><ArrowLeft class="size-4" /> Back to games</Button>
 			</div>
 		{:else if session}
 			<div class="grid flex-1">
@@ -377,7 +379,7 @@
 							<Button variant="sun" size="lg" onclick={() => run('next')} loading={busy === 'next' || session.ranking} disabled={session.ranking}><SkipForward class="size-4" /> {session.ranking ? 'Counting scores…' : 'Next word'}</Button>
 						{/if}
 					{:else}
-						<Button variant="sun" size="lg" href="/admin/games"><ArrowLeft class="size-4" /> Back to games</Button>
+						<Button variant="sun" size="lg" href={backHref}><ArrowLeft class="size-4" /> Back to games</Button>
 					{/if}
 				</div>
 			</div>

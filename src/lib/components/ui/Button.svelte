@@ -20,6 +20,9 @@
 		variant?: ButtonVariant;
 		size?: ButtonSize;
 		href?: string;
+		/** Link only: open in a new tab etc. */
+		target?: string;
+		rel?: string;
 		loading?: boolean;
 		class?: string;
 		children: Snippet;
@@ -29,6 +32,8 @@
 		variant = 'default',
 		size = 'md',
 		href,
+		target,
+		rel,
 		loading = false,
 		disabled,
 		type = 'button',
@@ -70,7 +75,7 @@
 </script>
 
 {#if href}
-	<a {href} class={classes} aria-disabled={disabled || undefined}>
+	<a {href} {target} {rel} class={classes} aria-disabled={disabled || undefined}>
 		{@render children()}
 	</a>
 {:else}

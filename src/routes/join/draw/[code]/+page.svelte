@@ -332,6 +332,7 @@
 			<Logo />
 			<p class="eyebrow mt-8 text-green-300">Scribble Showdown · {code}</p>
 			<h1 class="mt-2 font-display text-4xl font-bold tracking-tight uppercase">Final leaderboard</h1>
+			{#if session?.tournament}<Button variant="sun" class="mt-4 w-fit" href="/join/t/{session.tournament.code}">Back to the tournament</Button>{/if}
 			{#if session.scoring}
 				<div class="mt-16 flex items-center justify-center gap-3 text-cream/70" role="status"><Spinner /> Counting final scores…</div>
 			{:else}
@@ -393,6 +394,7 @@
 						You went offline, so you were removed from the game. Join again to keep playing — your score starts from zero.
 					</p>
 				{/if}
+					{#if session?.tournament}<p class="mt-6 rounded-lg border border-sun/30 bg-sun/10 px-3 py-2 text-sm text-sun">This game is part of a tournament. <a class="font-semibold underline" href="/join/t/{session.tournament.code}">Open the tournament</a> to take your seat.</p>{/if}
 				<form class="mt-6 space-y-3" onsubmit={submitJoin} novalidate>
 					<label for="name" class="eyebrow block text-cream/60">Your name</label>
 					<input
