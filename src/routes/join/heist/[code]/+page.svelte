@@ -161,6 +161,15 @@
 	let sending = $state(false);
 	let feedback = $state<{ tone: 'ok' | 'error'; text: string } | null>(null);
 	let inputEl = $state<HTMLInputElement>();
+	/** While the word box has focus (the phone keyboard is up), drop the help line to save room. */
+	let typing = $state(false);
+
+	// The round screen fits the space above the keyboard: the board scrolls, the word box stays put.
+	let fit = $state(false);
+	const fitRound = () => {
+		fit = true;
+		return () => (fit = false);
+	};
 
 	async function submit(e: SubmitEvent) {
 		e.preventDefault();
@@ -213,7 +222,7 @@
 
 <svelte:head><title>Word Heist · {code} — ZenCode</title></svelte:head>
 
-<GameStage>
+<GameStage {fit}>
 	<header class="sticky top-0 z-20 flex items-center gap-3 border-b border-white/10 bg-stage/85 px-4 py-3 backdrop-blur">
 		<div class="min-w-0">
 			<p class="font-display text-sm leading-tight font-bold tracking-[0.14em] uppercase">Word Heist</p>
@@ -237,7 +246,7 @@
 		{/if}
 	</header>
 
-	<main class="mx-auto flex w-full max-w-4xl flex-1 flex-col px-3 pt-5 pb-8 sm:px-4">
+	<main class="mx-auto flex w-full max-w-4xl flex-1 flex-col px-3 sm:px-4 {fit ? 'min-h-0 pt-3 pb-3' : 'pt-5 pb-8'}">
 		{#if loadState === 'loading'}
 			<div class="m-auto flex items-center gap-3 text-cream/70" role="status"><Spinner /> {offline ? 'Reconnecting…' : 'Loading…'}</div>
 		{:else if loadState === 'missing'}
@@ -424,128 +433,133 @@
 				</button>
 			{/snippet}
 
-			<div class="grid grid-cols-[3.25rem_minmax(0,1fr)_3.25rem] gap-2 sm:grid-cols-[5rem_minmax(0,1fr)_5rem] sm:gap-4">
-				<aside class="flex flex-col gap-3" aria-label="Players">
-					{#each leftSeats as p (p.id)}{@render seat(p)}{/each}
-				</aside>
+			<div class="-mx-3 min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-3 sm:-mx-4 sm:px-4" {@attach fitRound}>
+				<div class="grid grid-cols-[3.25rem_minmax(0,1fr)_3.25rem] gap-2 sm:grid-cols-[5rem_minmax(0,1fr)_5rem] sm:gap-4">
+					<aside class="flex flex-col gap-3" aria-label="Players">
+						{#each leftSeats as p (p.id)}{@render seat(p)}{/each}
+					</aside>
 
-				<div class="flex min-w-0 flex-col gap-4">
-					{#if board.status === 'ready' && board.round > 1}
-						<p class="rounded-lg border border-green-300/40 bg-green-300/10 px-4 py-3 text-sm font-semibold text-green-300" role="status" in:fly={{ y: -8, duration: 300 }}>
-							You're through to {session.final ? 'the final' : `stage ${board.round}`}! This is your new room (Room {board.number}) — the organiser will start it when everyone's ready.
-						</p>
-					{/if}
-					<!-- Tiles left / final countdown -->
-					<div
-						class="rounded-lg border px-4 py-3 transition-colors duration-300 {clock?.finalCountdown ? 'border-attention/60 bg-attention/10' : 'border-stage-line bg-stage-raised/80'}"
-						role="timer"
-						aria-label={clock?.finalCountdown ? `${formatClock(timeLeft)} left` : `${clock?.tilesLeft ?? board.tiles.count} tiles left`}
-					>
-						<div class="flex items-center gap-3">
-							<Timer class="size-5 shrink-0 {clock?.finalCountdown ? 'text-attention' : 'text-green-300'}" />
-							{#if board.status === 'ready'}
-								<span class="font-display text-2xl font-bold tabular text-cream">{board.tiles.count} tiles</span>
-								<span class="ml-auto text-sm text-cream/60">Waiting for the organiser to start…</span>
-							{:else if clock?.finalCountdown}
-								<span class="font-display text-3xl font-bold tabular text-attention">{formatClock(timeLeft)}</span>
-								<span class="ml-auto text-right text-sm font-semibold text-attention">{board.status === 'paused' ? 'Paused' : 'No tiles left — last chance!'}</span>
-							{:else}
-								<span class="font-display text-3xl font-bold tabular text-cream">{clock?.tilesLeft ?? board.tiles.count}</span>
-								<span class="text-xs font-semibold tracking-[0.14em] text-cream/50 uppercase">tiles left</span>
-								<span class="ml-auto text-sm text-cream/60">{board.status === 'paused' ? 'Paused' : formatClock(timeLeft)}</span>
+					<div class="flex min-w-0 flex-col gap-4">
+						{#if board.status === 'ready' && board.round > 1}
+							<p class="rounded-lg border border-green-300/40 bg-green-300/10 px-4 py-3 text-sm font-semibold text-green-300" role="status" in:fly={{ y: -8, duration: 300 }}>
+								You're through to {session.final ? 'the final' : `stage ${board.round}`}! This is your new room (Room {board.number}) — the organiser will start it when everyone's ready.
+							</p>
+						{/if}
+						<!-- Tiles left / final countdown -->
+						<div
+							class="rounded-lg border px-4 py-3 transition-colors duration-300 {clock?.finalCountdown ? 'border-attention/60 bg-attention/10' : 'border-stage-line bg-stage-raised/80'}"
+							role="timer"
+							aria-label={clock?.finalCountdown ? `${formatClock(timeLeft)} left` : `${clock?.tilesLeft ?? board.tiles.count} tiles left`}
+						>
+							<div class="flex items-center gap-3">
+								<Timer class="size-5 shrink-0 {clock?.finalCountdown ? 'text-attention' : 'text-green-300'}" />
+								{#if board.status === 'ready'}
+									<span class="font-display text-2xl font-bold tabular text-cream">{board.tiles.count} tiles</span>
+									<span class="ml-auto text-sm text-cream/60">Waiting for the organiser to start…</span>
+								{:else if clock?.finalCountdown}
+									<span class="font-display text-3xl font-bold tabular text-attention">{formatClock(timeLeft)}</span>
+									<span class="ml-auto text-right text-sm font-semibold text-attention">{board.status === 'paused' ? 'Paused' : 'No tiles left — last chance!'}</span>
+								{:else}
+									<span class="font-display text-3xl font-bold tabular text-cream">{clock?.tilesLeft ?? board.tiles.count}</span>
+									<span class="text-xs font-semibold tracking-[0.14em] text-cream/50 uppercase">tiles left</span>
+									<span class="ml-auto text-sm text-cream/60">{board.status === 'paused' ? 'Paused' : formatClock(timeLeft)}</span>
+								{/if}
+							</div>
+							{#if board.status === 'playing' && clock && !clock.finalCountdown}
+								<div class="mt-2 h-1 overflow-hidden rounded-full bg-stage" aria-hidden="true">
+									<div class="h-full rounded-full bg-sun" style="width: {tileProgress * 100}%"></div>
+								</div>
 							{/if}
 						</div>
-						{#if board.status === 'playing' && clock && !clock.finalCountdown}
-							<div class="mt-2 h-1 overflow-hidden rounded-full bg-stage" aria-hidden="true">
-								<div class="h-full rounded-full bg-sun" style="width: {tileProgress * 100}%"></div>
-							</div>
+
+						{#if alert}
+							<p class="rounded-lg border border-attention/40 bg-attention/10 px-4 py-2 text-sm font-semibold text-attention" in:fly={{ y: -8, duration: 200 }} out:fade role="alert">{alert.text}</p>
 						{/if}
+
+						<!-- Shared letters -->
+						<section aria-label="Letters — free for anyone to use">
+							<ul class="flex min-h-12 flex-wrap justify-center gap-1.5" aria-live="polite">
+								{#each board.pool as t (t.id)}
+									<li
+										in:fly={{ y: -24, duration: 320 }}
+										out:scale={{ start: 0.5, duration: 180 }}
+										class="grid size-10 place-items-center rounded-md border-b-4 border-sun/60 bg-sun font-display text-xl font-bold text-stage shadow-sm sm:size-11"
+									>
+										{t.c}
+									</li>
+								{:else}
+									<li class="self-center text-center text-sm text-cream/50">
+										{board.status === 'ready' ? `Letters drop here every ${(board.tiles.everyMs / 1000).toFixed(1)} s once the round starts.` : 'The next letter is on its way.'}
+									</li>
+								{/each}
+							</ul>
+						</section>
+
+						<!-- Everyone's words, in their owner's colour -->
+						<section class="min-h-24 rounded-xl border border-stage-line bg-stage-raised/60 p-3" aria-label="Words on the table">
+							<ul class="flex flex-wrap justify-center gap-x-3 gap-y-2.5">
+								{#each tableWords as w (w.id)}
+									<li
+										in:scale={{ start: 0.6, duration: 260 }}
+										title="{w.mine ? 'Your' : `${w.ownerName}'s`} word"
+										class="flex gap-0.5 rounded-md p-0.5 transition-opacity duration-200 {w.fresh ? 'word-fresh' : ''} {focusId && focusId !== w.owner ? 'opacity-25' : ''}"
+										style="--ring: {w.color}; {focusId === w.owner ? `box-shadow: 0 0 0 2px ${w.color}` : ''}"
+									>
+										<span class="sr-only">{w.text}, {w.mine ? 'yours' : w.ownerName}</span>
+										{#each [...w.text] as c, i (i)}
+											<span aria-hidden="true" class="grid size-7 place-items-center rounded font-display text-base font-bold sm:size-8 sm:text-lg" style="background: {w.color}; color: {inkOn(w.color)}">{c}</span>
+										{/each}
+									</li>
+								{:else}
+									<li class="self-center py-6 text-sm text-cream/50">Words people make appear here, in their colour.</li>
+								{/each}
+							</ul>
+						</section>
 					</div>
 
-					{#if alert}
-						<p class="rounded-lg border border-attention/40 bg-attention/10 px-4 py-2 text-sm font-semibold text-attention" in:fly={{ y: -8, duration: 200 }} out:fade role="alert">{alert.text}</p>
-					{/if}
-
-					<!-- Shared letters -->
-					<section aria-label="Letters — free for anyone to use">
-						<ul class="flex min-h-12 flex-wrap justify-center gap-1.5" aria-live="polite">
-							{#each board.pool as t (t.id)}
-								<li
-									in:fly={{ y: -24, duration: 320 }}
-									out:scale={{ start: 0.5, duration: 180 }}
-									class="grid size-10 place-items-center rounded-md border-b-4 border-sun/60 bg-sun font-display text-xl font-bold text-stage shadow-sm sm:size-11"
-								>
-									{t.c}
-								</li>
-							{:else}
-								<li class="self-center text-center text-sm text-cream/50">
-									{board.status === 'ready' ? `Letters drop here every ${(board.tiles.everyMs / 1000).toFixed(1)} s once the round starts.` : 'The next letter is on its way.'}
-								</li>
-							{/each}
-						</ul>
-					</section>
-
-					<!-- Everyone's words, in their owner's colour -->
-					<section class="min-h-24 rounded-xl border border-stage-line bg-stage-raised/60 p-3" aria-label="Words on the table">
-						<ul class="flex flex-wrap justify-center gap-x-3 gap-y-2.5">
-							{#each tableWords as w (w.id)}
-								<li
-									in:scale={{ start: 0.6, duration: 260 }}
-									title="{w.mine ? 'Your' : `${w.ownerName}'s`} word"
-									class="flex gap-0.5 rounded-md p-0.5 transition-opacity duration-200 {w.fresh ? 'word-fresh' : ''} {focusId && focusId !== w.owner ? 'opacity-25' : ''}"
-									style="--ring: {w.color}; {focusId === w.owner ? `box-shadow: 0 0 0 2px ${w.color}` : ''}"
-								>
-									<span class="sr-only">{w.text}, {w.mine ? 'yours' : w.ownerName}</span>
-									{#each [...w.text] as c, i (i)}
-										<span aria-hidden="true" class="grid size-7 place-items-center rounded font-display text-base font-bold sm:size-8 sm:text-lg" style="background: {w.color}; color: {inkOn(w.color)}">{c}</span>
-									{/each}
-								</li>
-							{:else}
-								<li class="self-center py-6 text-sm text-cream/50">Words people make appear here, in their colour.</li>
-							{/each}
-						</ul>
-					</section>
-
-					<!-- Move -->
-					<form class="rounded-xl border border-stage-line bg-stage-raised/80 p-4" onsubmit={submit} novalidate>
-						<div class="flex gap-2">
-							<input
-								bind:this={inputEl}
-								bind:value={input}
-								maxlength="20"
-								autocomplete="off"
-								autocapitalize="characters"
-								spellcheck="false"
-								enterkeyhint="send"
-								disabled={!live}
-								placeholder="Type a word and press enter"
-								aria-label="Your word"
-								aria-describedby="move-help move-feedback"
-								class="h-14 min-w-0 flex-1 rounded-lg border-2 bg-stage px-4 font-mono text-xl font-bold tracking-[0.12em] text-cream uppercase outline-none transition-colors placeholder:font-sans placeholder:text-base placeholder:font-normal placeholder:tracking-normal placeholder:text-cream/30 placeholder:normal-case focus:border-green-300 disabled:opacity-50
-									{feedback?.tone === 'error' ? 'border-attention' : 'border-stage-line'}"
-							/>
-							<Button type="submit" variant="sun" size="xl" class="px-5!" loading={sending} disabled={!live || sending}>Play</Button>
-						</div>
-						<p id="move-help" class="mt-2 text-xs text-cream/50">
-							Make a word ({board.rules.minWordLength}+ letters) from the letters, or steal any word by adding at least one letter to it. Adding just an S to the end doesn't count.
-						</p>
-						<div id="move-feedback" aria-live="assertive" class="min-h-6 pt-2">
-							{#if feedback}
-								<p class="text-sm {feedback.tone === 'ok' ? 'text-green-300' : 'text-attention'}" in:fly={{ y: -6, duration: 200 }}>{feedback.text}</p>
-							{/if}
-						</div>
-						{#if board.status === 'paused'}
-							<p class="flex items-center gap-2 text-sm text-sun" role="status"><Pause class="size-4" /> The organiser paused the round.</p>
-						{:else if board.status === 'ready'}
-							<p class="text-sm text-cream/60">Everyone starts on 0. Moves open when the round starts.</p>
-						{/if}
-					</form>
+					<aside class="flex flex-col gap-3" aria-label="Players">
+						{#each rightSeats as p (p.id)}{@render seat(p)}{/each}
+					</aside>
 				</div>
-
-				<aside class="flex flex-col gap-3" aria-label="Players">
-					{#each rightSeats as p (p.id)}{@render seat(p)}{/each}
-				</aside>
 			</div>
+
+			<!-- Move: pinned under the board, just above the phone keyboard -->
+			<form class="shrink-0 rounded-xl border border-stage-line bg-stage-raised/90 p-3 sm:mx-[6rem] sm:p-4" onsubmit={submit} novalidate>
+				<div class="flex gap-2">
+					<input
+						bind:this={inputEl}
+						bind:value={input}
+						maxlength="20"
+						autocomplete="off"
+						autocapitalize="characters"
+						spellcheck="false"
+						enterkeyhint="send"
+						disabled={!live}
+						placeholder="Type a word and press enter"
+						aria-label="Your word"
+						aria-describedby="move-help move-feedback"
+						onfocus={() => (typing = true)}
+						onblur={() => (typing = false)}
+						class="h-14 min-w-0 flex-1 rounded-lg border-2 bg-stage px-4 font-mono text-xl font-bold tracking-[0.12em] text-cream uppercase outline-none transition-colors placeholder:font-sans placeholder:text-base placeholder:font-normal placeholder:tracking-normal placeholder:text-cream/30 placeholder:normal-case focus:border-green-300 disabled:opacity-50
+							{feedback?.tone === 'error' ? 'border-attention' : 'border-stage-line'}"
+					/>
+					<!-- preventDefault on press keeps focus in the word box, so the keyboard stays up -->
+					<Button type="submit" variant="sun" size="xl" class="px-5!" loading={sending} disabled={!live || sending} onpointerdown={(e: PointerEvent) => e.preventDefault()}>Play</Button>
+				</div>
+				<p id="move-help" class="mt-2 text-xs text-cream/50 {typing ? 'max-sm:hidden' : ''}">
+					Make a word ({board.rules.minWordLength}+ letters) from the letters, or steal any word by adding at least one letter to it. Adding just an S to the end doesn't count.
+				</p>
+				<div id="move-feedback" aria-live="assertive" class="min-h-6 pt-2">
+					{#if feedback}
+						<p class="text-sm {feedback.tone === 'ok' ? 'text-green-300' : 'text-attention'}" in:fly={{ y: -6, duration: 200 }}>{feedback.text}</p>
+					{/if}
+				</div>
+				{#if board.status === 'paused'}
+					<p class="flex items-center gap-2 text-sm text-sun" role="status"><Pause class="size-4" /> The organiser paused the round.</p>
+				{:else if board.status === 'ready'}
+					<p class="text-sm text-cream/60">Everyone starts on 0. Moves open when the round starts.</p>
+				{/if}
+			</form>
 		{:else}
 			<div class="m-auto text-center" role="status">
 				<Wifi class="mx-auto size-8 text-cream/40" />
