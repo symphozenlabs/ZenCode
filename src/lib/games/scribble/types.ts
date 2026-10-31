@@ -1,4 +1,5 @@
 import type { Difficulty, PackId } from './words';
+import type { TournamentTag } from '$lib/games/tournament/types';
 
 /**
  * Firestore shapes for a Scribble Showdown session. It shares the
@@ -117,6 +118,8 @@ export interface DrawSession {
 	resets?: number;
 	/** The last players removed for going offline (the big screen announces them). */
 	kicked?: { names: string[]; count: number; at: number } | null;
+	/** Set when this session is one room of a tournament stage (players are seated by the tournament). */
+	tournament?: TournamentTag;
 }
 
 export interface DrawPlayer {

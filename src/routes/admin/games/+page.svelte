@@ -1,62 +1,41 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { collection, limit, onSnapshot, orderBy, query } from 'firebase/firestore';
-	import { Play, ListChecks, Radio, History, Trophy, Users, CloudOff, Gamepad2, TriangleAlert, ArrowRight, Trash2, ChevronLeft, ChevronRight } from '@lucide/svelte';
+	import { Play, ListChecks, Radio, History, Trophy, Users, CloudOff, Gamepad2, TriangleAlert, ArrowRight, Trash2, ChevronLeft, ChevronRight, Swords, Check } from '@lucide/svelte';
 	import { db } from '$lib/firebase/client';
 	import { adminAuth } from '$lib/stores/admin-auth.svelte';
-	import { GAMES, gameName, presenterHref } from '$lib/games/registry';
+	import { GAMES, TOURNAMENT, gameName, presenterHref } from '$lib/games/registry';
 	import { SESSIONS, type LiveSession } from '$lib/games/tech-word-rush/types';
-	import { QUESTIONS_PER_GAME, type WordQuestion } from '$lib/games/tech-word-rush/questions';
+	import type { WordQuestion } from '$lib/games/tech-word-rush/questions';
 	import { createSession } from '$lib/games/tech-word-rush/api';
 	import { createSession as createFlappySession } from '$lib/games/flappy/api';
-	import { DURATIONS as FLAP_DURATIONS, durationLabel, type FlapSession } from '$lib/games/flappy/types';
+	import { durationLabel, type FlapSession } from '$lib/games/flappy/types';
 	import { isFlyGame } from '$lib/games/flappy/skins';
-	import { createTournament } from '$lib/games/word-heist/api';
-	import { describeSizes, maxParticipants, planStages, solveShape, type ShapeKey } from '$lib/games/word-heist/allocation';
-	import {
-		DEFAULT_ROOM_SIZE,
-		DEFAULT_RULES,
-		FINAL_OPTIONS,
-		GAME_RULES,
-		MAX_PLAYERS,
-		MAX_STAGES,
-		PACE_LIMITS,
-		ROOM_MAX,
-		ROOM_MIN,
-		ROUND_SECONDS,
-		RULE_LIMITS,
-		TILE_LIMITS,
-		maxTilesFor,
-		formatClock,
-		suggestedTiles,
-		TILE_BANDS,
-		bandTiles,
-		tileBand,
-		tilePace,
-		tilesFor,
-		type HeistMode,
-		type HeistRules,
-		type HeistSession
-	} from '$lib/games/word-heist/types';
+	import { createTournament as createHeistTournament } from '$lib/games/word-heist/api';
+	import type { HeistRules, HeistSession } from '$lib/games/word-heist/types';
 	import { createSession as createScribbleSession } from '$lib/games/scribble/api';
-	import { DRAW_SECONDS, TURN_COUNTS, type DrawSession } from '$lib/games/scribble/types';
-	import { PACKS, buildPool, parseCustomWords, type PackId } from '$lib/games/scribble/words';
+	import type { DrawSession } from '$lib/games/scribble/types';
+	import type { PackId } from '$lib/games/scribble/words';
+	import { createTournament } from '$lib/games/tournament/api';
+	import { DEFAULT_ROOM_SIZE as DRAW_ROOM, FORMAT_OF, ROOMS_LIMITS, formatLabel, isTournamentGame, type EliminationRules as ElimRules, type GameSettings, type TournamentRules, type TournamentSession } from '$lib/games/tournament/types';
 	import { formatTimestamp } from '$lib/utils/format';
 	import PageHeader from '$lib/components/admin/PageHeader.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
-	import SelectField from '$lib/components/ui/SelectField.svelte';
-	import Field from '$lib/components/ui/Field.svelte';
-	import Segmented from '$lib/components/live/Segmented.svelte';
-	import QuestionSetPicker, { type QuestionMode } from '$lib/components/games/QuestionSetPicker.svelte';
 	import Skeleton from '$lib/components/ui/Skeleton.svelte';
 	import StateMessage from '$lib/components/ui/StateMessage.svelte';
 	import AnimatedGrid from '$lib/components/motion/AnimatedGrid.svelte';
 	import GradientOrb from '$lib/components/motion/GradientOrb.svelte';
 	import SessionStatusBadge from '$lib/components/games/SessionStatusBadge.svelte';
+	import type { QuestionMode } from '$lib/components/games/QuestionSetPicker.svelte';
+	import TechWordRushSetup from '$lib/components/games/setup/TechWordRushSetup.svelte';
+	import FlySetup from '$lib/components/games/setup/FlySetup.svelte';
+	import ScribbleSetup from '$lib/components/games/setup/ScribbleSetup.svelte';
+	import WordHeistSetup from '$lib/components/games/setup/WordHeistSetup.svelte';
+	import EliminationRules from '$lib/components/games/setup/EliminationRules.svelte';
+	import RoomsRules, { type RoomsShape } from '$lib/components/games/setup/RoomsRules.svelte';
 
-	type AnySession = LiveSession | FlapSession | HeistSession | DrawSession;
+	type AnySession = LiveSession | FlapSession | HeistSession | DrawSession | TournamentSession;
 	let sessions = $state<AnySession[]>([]);
 	let status = $state<'loading' | 'ready' | 'error'>('loading');
 	let attempt = $state(0);
@@ -78,8 +57,10 @@
 		);
 	});
 
-	const active = $derived(sessions.filter((s) => s.status !== 'finished'));
-	const history = $derived(sessions.filter((s) => s.status === 'finished'));
+	// A tournament's rooms are ordinary game sessions; they are shown from the tournament, not here.
+	const visible = $derived(sessions.filter((s) => !('tournament' in s && s.tournament)));
+	const active = $derived(visible.filter((s) => s.status !== 'finished'));
+	const history = $derived(visible.filter((s) => s.status === 'finished'));
 
 	// Session history, HISTORY_PAGE at a time.
 	const HISTORY_PAGE = 10;
@@ -100,160 +81,23 @@
 			.catch(() => (server = { ready: false, message: 'Unable to reach the game server.' }));
 	});
 
-	// Start a live game
+	// ── Each game's own settings (shared by the Start and Tournament dialogs) ──
+	let twr = $state({ duration: 15, words: 10, questionMode: 'random' as QuestionMode, questions: [] as WordQuestion[], problem: '' });
+	let flap = $state({ duration: '180' });
+	let scribble = $state({ drawSeconds: 80, turns: 8, packs: ['everyday', 'tech'] as PackId[], custom: '', problem: '' });
+	const scribbleSettings = $derived({ drawSeconds: scribble.drawSeconds, turns: scribble.turns, packs: scribble.packs, custom: scribble.custom });
+
+	// ── Start a live game ────────────────────────────────────────────────
 	let startFor = $state<string | null>(null);
 	const startOpen = $derived(startFor !== null);
-	let duration = $state(15);
-	let questionMode = $state<QuestionMode>('random');
-	let fixedQuestions = $state<WordQuestion[]>([]);
-	let questionProblem = $state('');
-	let flapDuration = $state('180');
-	// Word Heist: one game room, or a tournament of stages.
-	let heistMode = $state<HeistMode>('tournament');
-	let heist = $state({
-		roundSeconds: String(DEFAULT_RULES.roundSeconds),
-		finalSeconds: String(DEFAULT_RULES.finalSeconds),
-		tiles: String(DEFAULT_RULES.tileCount),
-		minWordLength: String(DEFAULT_RULES.minWordLength),
-		gamePlayers: String(DEFAULT_ROOM_SIZE),
-		participants: String(DEFAULT_RULES.maxPlayers),
-		stages: String(DEFAULT_RULES.stages),
-		advance: String(DEFAULT_RULES.advance),
-		roomSize: String(DEFAULT_RULES.roomSize)
-	});
-
-	const roundSeconds = $derived(Number(heist.roundSeconds));
-	const finalSeconds = $derived(Number(heist.finalSeconds));
-	const tileCount = $derived(Number(heist.tiles));
-	/** The room size tiles are set for: the game's players, or a tournament's room size. */
-	const fullRoom = $derived(Number(heistMode === 'game' ? heist.gamePlayers : heist.roomSize));
-
-	const heistRules = $derived<HeistRules>(
-		heistMode === 'game'
-			? { ...GAME_RULES, roundSeconds, finalSeconds, tileCount, minWordLength: Number(heist.minWordLength), maxPlayers: fullRoom, roomSize: fullRoom }
-			: {
-					mode: 'tournament',
-					roundSeconds,
-					finalSeconds,
-					tileCount,
-					minWordLength: Number(heist.minWordLength),
-					stages: Number(heist.stages),
-					advance: Number(heist.advance),
-					maxPlayers: Number(heist.participants),
-					roomSize: fullRoom
-				}
-	);
-	/** Most players the chosen stages, room size and players-through can take. */
-	const heistMax = $derived(maxParticipants(Number(heist.stages), Number(heist.advance), fullRoom));
-	const heistPlan = $derived(
-		heistMode === 'game' ? planStages(fullRoom, 1, 0, fullRoom) : planStages(Number(heist.participants), Number(heist.stages), Number(heist.advance), fullRoom)
-	);
-	const heistPace = $derived(tilePace(roundSeconds, tileCount));
-	/** Most tiles a full room can have for this round length. */
-	const maxTiles = $derived(maxTilesFor(roundSeconds));
-
-	// ── Locks: a box the organiser sets stays as they set it ─────────────
-	// Only the boxes they haven't touched are worked out. If what they set
-	// can't work, the form says which boxes to change instead of changing them.
-	type LockKey = ShapeKey | 'tiles';
-	const SHAPE_KEYS: readonly LockKey[] = ['participants', 'stages', 'roomSize', 'advance'];
-	let locked = $state<LockKey[]>([]);
-	let shapeProblem = $state('');
-	const lock = (key: LockKey) => {
-		if (!locked.includes(key)) locked = [...locked, key];
-	};
-	/** Free a box again: it (and the others not set) are worked out afresh. */
-	function unlock(key: LockKey) {
-		locked = locked.filter((k) => k !== key);
-		if (SHAPE_KEYS.includes(key)) solveShapeBoxes();
-		else recalcTiming();
-	}
-
-	/** Fill the tournament boxes the organiser hasn't set. */
-	function solveShapeBoxes() {
-		const current = { participants: Number(heist.participants), stages: Number(heist.stages), roomSize: Number(heist.roomSize), advance: Number(heist.advance) };
-		if (Object.values(current).some((v) => !Number.isInteger(v))) return;
-		const out = solveShape(current, new Set(locked.filter((k): k is ShapeKey => k in current)));
-		if (typeof out === 'string') {
-			shapeProblem = out;
-			return;
-		}
-		shapeProblem = '';
-		Object.assign(heist, { participants: String(out.participants), stages: String(out.stages), roomSize: String(out.roomSize), advance: String(out.advance) });
-	}
-	function onShape(key: ShapeKey, value: string) {
-		heist[key] = value;
-		lock(key);
-		solveShapeBoxes();
-	}
-
-	// ── Timing: round length and tiles are set; the pace is worked out ──
-	// Tiles not set: the suggested bag for the room size and round length.
-	function recalcTiming() {
-		if (!locked.includes('tiles')) heist.tiles = String(suggestedTiles(fullRoom, roundSeconds));
-	}
-	function onTiles(value: string) {
-		heist.tiles = value;
-		lock('tiles');
-	}
-	// A different room size (or switching game ⇄ tournament) re-suggests the tiles unless they were set.
-	let tilesSetFor = DEFAULT_RULES.roomSize;
-	$effect(() => {
-		const size = fullRoom;
-		if (size === tilesSetFor || !(size >= ROOM_MIN)) return;
-		tilesSetFor = size;
-		untrack(recalcTiming);
-	});
-
-	// Each problem is shown next to the boxes it's about.
-	const shapeError = $derived.by(() => {
-		if (heistMode === 'tournament') {
-			if (shapeProblem) return shapeProblem;
-			if (!/^\d+$/.test(heist.participants.trim())) return 'Enter the number of participants.';
-			if (Number(heist.participants) > MAX_PLAYERS) return `At most ${MAX_PLAYERS} participants.`;
-		}
-		return typeof heistPlan === 'string' ? heistPlan : '';
-	});
-	const timingError = $derived.by(() => {
-		if (!Number.isInteger(tileCount) || tileCount < TILE_LIMITS[0] || tileCount > maxTiles)
-			return `Tiles per room: ${TILE_LIMITS[0]}–${maxTiles} for a ${durationLabel(roundSeconds)} round${tileCount > maxTiles ? ' — use fewer tiles or a longer round' : ''}.`;
-		if (heistPace < PACE_LIMITS[0])
-			return `${tileCount} tiles in ${durationLabel(roundSeconds)} is a tile every ${heistPace.toFixed(1)} s — at most ${tilesFor(roundSeconds, PACE_LIMITS[0])} tiles fit (one every ${PACE_LIMITS[0]} s). Use fewer tiles or a longer round.`;
-		if (heistPace > PACE_LIMITS[1])
-			return `${tileCount} tiles in ${durationLabel(roundSeconds)} is a tile every ${heistPace.toFixed(1)} s — use at least ${tilesFor(roundSeconds, PACE_LIMITS[1])} tiles or a shorter round.`;
-		return '';
-	});
-	const heistProblem = $derived(shapeError || timingError);
-	/** What each room-size band gets, from the full room's band down. */
-	const tileBands = $derived(
-		Array.from({ length: tileBand(fullRoom) }, (_, i) => {
-			const band = tileBand(fullRoom) - i;
-			const low = band === 1 ? ROOM_MIN : TILE_BANDS[band - 2] + 1;
-			const high = Math.min(TILE_BANDS[band - 1], fullRoom);
-			const count = bandTiles(high, fullRoom, tileCount);
-			return { label: low === high ? `${low}` : `${low}–${high}`, count, pace: tilePace(roundSeconds, count) };
-		})
-	);
-	const range = (lo: number, hi: number) => Array.from({ length: hi - lo + 1 }, (_, i) => lo + i);
-	let drawSeconds = $state<number>(80);
-	let drawTurns = $state<number>(8);
-	let drawPacks = $state<PackId[]>(['everyday', 'tech']);
-	let customWords = $state('');
+	let heistGame = $state<{ rules: HeistRules | null; problem: string }>({ rules: null, problem: '' });
 	let creating = $state(false);
 	let createError = $state('');
 
-	const wordCount = $derived(questionMode === 'random' ? QUESTIONS_PER_GAME : fixedQuestions.length);
-	const customCount = $derived(parseCustomWords(customWords).length);
-	const drawPool = $derived(buildPool(drawPacks, parseCustomWords(customWords)).length);
-	const drawProblem = $derived(drawPool < 10 ? 'Pick a word pack, or add at least 10 words of your own.' : '');
 	// Tech Word Rush needs a valid question set, Word Heist sensible rules, Scribble enough words.
 	const blocked = $derived(
-		startFor === 'word-heist' ? !!heistProblem : startFor === 'scribble' ? !!drawProblem : !isFlyGame(startFor) && !!questionProblem
+		startFor === 'word-heist' ? !heistGame.rules : startFor === 'scribble' ? !!scribble.problem : !isFlyGame(startFor) && !!twr.problem
 	);
-
-	function togglePack(id: PackId) {
-		drawPacks = drawPacks.includes(id) ? drawPacks.filter((p) => p !== id) : [...drawPacks, id];
-	}
 
 	function openStart(id: string) {
 		startFor = id;
@@ -263,7 +107,7 @@
 	async function start() {
 		if (blocked) {
 			// Word Heist problems are already shown beside their boxes; Scribble's word packs need a message here.
-			createError = startFor === 'word-heist' ? '' : startFor === 'scribble' ? drawProblem : questionProblem;
+			createError = startFor === 'word-heist' ? '' : startFor === 'scribble' ? scribble.problem : twr.problem;
 			return;
 		}
 		creating = true;
@@ -272,21 +116,77 @@
 			const token = await adminAuth.user?.getIdToken();
 			if (!token) throw new Error('Your session expired. Sign in again.');
 			if (startFor === 'word-heist') {
-				const { code } = await createTournament(token, heistRules);
+				const { code } = await createHeistTournament(token, heistGame.rules!);
 				await goto(presenterHref('word-heist', code));
 			} else if (isFlyGame(startFor)) {
-				const { code } = await createFlappySession(token, Number(flapDuration), startFor);
+				const { code } = await createFlappySession(token, Number(flap.duration), startFor);
 				await goto(presenterHref(startFor, code));
 			} else if (startFor === 'scribble') {
-				const { code } = await createScribbleSession(token, { drawSeconds, turns: drawTurns, packs: drawPacks, custom: customWords });
+				const { code } = await createScribbleSession(token, scribbleSettings);
 				await goto(presenterHref('scribble', code));
 			} else {
-				const { code } = await createSession(token, duration, questionMode === 'random' ? undefined : fixedQuestions);
+				const { code } = await createSession(token, twr.duration, twr.questionMode === 'random' ? undefined : twr.questions);
 				await goto(presenterHref('tech-word-rush', code));
 			}
 		} catch (err) {
 			createError = (err as Error).message || 'Unable to create the game.';
 			creating = false;
+		}
+	}
+
+	// ── Tournament: pick a game, keep its setup, add the tournament rules ──
+	let tourOpen = $state(false);
+	let tourGame = $state<string | null>(null);
+	let heistTour = $state<{ rules: HeistRules | null; problem: string }>({ rules: null, problem: '' });
+	let elim = $state<{ rules: ElimRules | null; problem: string }>({ rules: null, problem: '' });
+	let rooms = $state<{ rules: RoomsShape | null; problem: string }>({ rules: null, problem: '' });
+	let tourCreating = $state(false);
+	let tourError = $state('');
+
+	/** How this game is run as a tournament. */
+	const tourFormat = $derived(tourGame === 'word-heist' ? 'rooms' : isTournamentGame(tourGame) ? FORMAT_OF[tourGame] : null);
+	const tourBlocked = $derived.by(() => {
+		if (!tourGame) return true;
+		if (tourGame === 'word-heist') return !heistTour.rules;
+		if (tourGame === 'scribble') return !!scribble.problem || !rooms.rules;
+		return !elim.rules;
+	});
+
+	function openTournament() {
+		tourOpen = true;
+		tourError = '';
+	}
+
+	async function createTour() {
+		if (tourBlocked || !tourGame) return;
+		tourCreating = true;
+		tourError = '';
+		try {
+			const token = await adminAuth.user?.getIdToken();
+			if (!token) throw new Error('Your session expired. Sign in again.');
+			if (tourGame === 'word-heist') {
+				const { code } = await createHeistTournament(token, heistTour.rules!);
+				await goto(presenterHref('word-heist', code));
+				return;
+			}
+			if (!isTournamentGame(tourGame)) throw new Error('Choose a game for the tournament.');
+			let settings: GameSettings;
+			let rules: TournamentRules;
+			if (tourGame === 'tech-word-rush') {
+				settings = { duration: twr.duration, words: twr.words };
+				rules = elim.rules!;
+			} else if (tourGame === 'scribble') {
+				settings = scribbleSettings;
+				rules = { format: 'rooms', ...rooms.rules! };
+			} else {
+				settings = { duration: Number(flap.duration) };
+				rules = elim.rules!;
+			}
+			const { code } = await createTournament(token, { game: tourGame, settings, rules });
+			await goto(presenterHref('tournament', code));
+		} catch (err) {
+			tourError = (err as Error).message || 'Unable to create the tournament.';
+			tourCreating = false;
 		}
 	}
 
@@ -311,6 +211,24 @@
 			clearing = false;
 		}
 	}
+
+	/** One line about where a session is. */
+	function progress(s: AnySession): string {
+		switch (s.gameType) {
+			case 'tournament':
+				return `${gameName(s.game)} · ${s.stage === 0 ? 'Registration' : s.final ? 'Final' : `Stage ${s.stage} / ${s.totalStages}`}${s.rooms.length > 1 ? ` · ${s.rooms.length} rooms` : ''}`;
+			case 'word-heist':
+				return s.round === 0 ? 'Registration' : s.final ? 'Final' : `Round ${s.round} · ${s.roomCount} rooms`;
+			case 'scribble':
+				return s.status === 'lobby' ? `${s.totalTurns} turns` : `Turn ${Math.max(1, s.drawCount)} / ${s.totalTurns}`;
+			case 'tech-word-rush':
+				return s.questionIndex < 0 ? 'Not started' : `Word ${s.questionIndex + 1} / ${s.totalQuestions}`;
+			default:
+				return s.status === 'lobby' ? `${durationLabel(s.duration)} window` : 'Flights live';
+		}
+	}
+	/** The name shown in the lists: a Word Heist tournament is a tournament too. */
+	const listName = (s: AnySession) => (s.gameType === 'word-heist' && s.rules.mode === 'tournament' ? 'Word Heist tournament' : gameName(s.gameType));
 </script>
 
 <svelte:head><title>Games — ZenCode Admin</title></svelte:head>
@@ -398,15 +316,15 @@
 									</g>
 								</svg>
 							{:else}
-							<div class="mb-3 flex gap-1" aria-hidden="true">
-								{#each ['P', '', '', '', '', 'N'] as ch, i (i)}
-									<span
-										class="grid h-8 w-6.5 place-items-center rounded border font-display text-sm font-bold transition-colors duration-300
-											{ch ? 'border-green-300/60 bg-forest-900 text-cream' : 'border-stage-line bg-stage-raised group-hover:border-green-300/30'}"
-										>{ch}</span
-									>
-								{/each}
-							</div>
+								<div class="mb-3 flex gap-1" aria-hidden="true">
+									{#each ['P', '', '', '', '', 'N'] as ch, i (i)}
+										<span
+											class="grid h-8 w-6.5 place-items-center rounded border font-display text-sm font-bold transition-colors duration-300
+												{ch ? 'border-green-300/60 bg-forest-900 text-cream' : 'border-stage-line bg-stage-raised group-hover:border-green-300/30'}"
+											>{ch}</span
+										>
+									{/each}
+								</div>
 							{/if}
 							<h2 class="font-display text-2xl font-bold tracking-tight uppercase">{game.name}</h2>
 							<p class="mt-0.5 text-sm text-sun">{game.tagline}</p>
@@ -434,6 +352,35 @@
 	</div>
 {/if}
 
+<!-- Tournament module -->
+<section class="group relative mt-6 overflow-hidden rounded-lg border border-border bg-stage text-cream" aria-labelledby="tournament-h">
+	<AnimatedGrid size={28} animated={false} />
+	<GradientOrb size="22rem" class="-top-32 -right-24 opacity-40" />
+	<div class="relative flex flex-col gap-5 p-5 md:flex-row md:items-center md:gap-8">
+		<div class="hidden shrink-0 md:block" aria-hidden="true">
+			<div class="grid grid-cols-3 gap-1">
+				{#each [8, 8, 8, 2, 2, 2, 0, 1, 0] as n, i (i)}
+					<span class="grid size-8 place-items-center rounded border font-display text-xs font-bold transition-colors duration-300 {n === 1 ? 'border-sun bg-sun/20 text-sun' : n ? 'border-green-300/50 bg-forest-900 text-cream' : 'border-transparent'}">{n === 1 ? '★' : n || ''}</span>
+				{/each}
+			</div>
+		</div>
+		<div class="min-w-0 flex-1">
+			<p class="eyebrow text-green-300/80">Tournament</p>
+			<h2 id="tournament-h" class="mt-1 font-display text-2xl font-bold tracking-tight uppercase">{TOURNAMENT.name}</h2>
+			<p class="mt-0.5 text-sm text-sun">{TOURNAMENT.tagline}</p>
+			<p class="mt-3 max-w-2xl text-sm text-cream/70">{TOURNAMENT.description}</p>
+			<ul class="mt-3 flex flex-wrap gap-1.5">
+				{#each TOURNAMENT.tags as tag (tag)}
+					<li class="rounded-md border border-green-300/30 px-2 py-0.5 text-xs font-medium text-green-300">{tag}</li>
+				{/each}
+			</ul>
+		</div>
+		<div class="shrink-0">
+			<Button variant="sun" size="lg" onclick={openTournament} disabled={server?.ready === false}><Swords class="size-4" /> Create tournament</Button>
+		</div>
+	</div>
+</section>
+
 <!-- Sessions -->
 <div class="mt-8 grid gap-6 xl:grid-cols-2">
 	<section class="rounded-lg border border-border bg-card" aria-labelledby="active-h">
@@ -453,7 +400,7 @@
 				<Button variant="outline" onclick={() => attempt++}>Retry</Button>
 			</StateMessage>
 		{:else if !active.length}
-			<StateMessage icon={Radio} title="No live sessions" description="Start a live game to open a lobby with a join QR code." />
+			<StateMessage icon={Radio} title="No live sessions" description="Start a live game or a tournament to open a lobby with a join QR code." />
 		{:else}
 			<ul class="divide-y divide-border">
 				{#each active as s (s.code)}
@@ -461,24 +408,15 @@
 						<span class="min-w-0">
 							<span class="block font-mono font-semibold tracking-wider">{s.code}</span>
 							<span class="block text-xs text-muted-foreground">
-								{gameName(s.gameType)} · {formatTimestamp(s.createdAt, true)}
+								{listName(s)} · {formatTimestamp(s.createdAt, true)}
 							</span>
 						</span>
 						<SessionStatusBadge status={s.status} />
 						<span class="inline-flex items-center gap-1 text-xs text-muted-foreground tabular"><Users class="size-3.5" />{s.playerCount}</span>
-						<span class="text-xs text-muted-foreground tabular">
-							{#if s.gameType === 'word-heist'}
-								{s.round === 0 ? 'Registration' : s.final ? 'Final' : `Round ${s.round} · ${s.roomCount} rooms`}
-							{:else if s.gameType === 'scribble'}
-								{s.status === 'lobby' ? `${s.totalTurns} turns` : `Turn ${Math.max(1, s.drawCount)} / ${s.totalTurns}`}
-							{:else if s.gameType !== 'tech-word-rush'}
-								{s.status === 'lobby' ? `${durationLabel(s.duration)} window` : 'Flights live'}
-							{:else}
-								{s.questionIndex < 0 ? 'Not started' : `Word ${s.questionIndex + 1} / ${s.totalQuestions}`}
-							{/if}
-						</span>
+						<span class="text-xs text-muted-foreground tabular">{progress(s)}</span>
 						<Button size="sm" variant="outline" class="ml-auto" href={presenterHref(s.gameType, s.code)}>
-							Open presenter <ArrowRight class="size-3.5" />
+							{s.gameType === 'tournament' || (s.gameType === 'word-heist' && s.rules.mode === 'tournament') ? 'Open dashboard' : 'Open presenter'}
+							<ArrowRight class="size-3.5" />
 						</Button>
 					</li>
 				{/each}
@@ -513,7 +451,10 @@
 							href={presenterHref(s.gameType, s.code)}
 							class="grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-0.5 px-4 py-3 text-sm transition-colors duration-150 hover:bg-muted/60 sm:grid-cols-[7rem_1fr_5rem_auto]"
 						>
-							<span class="font-mono font-semibold tracking-wider">{s.code}</span>
+							<span class="min-w-0">
+								<span class="block font-mono font-semibold tracking-wider">{s.code}</span>
+								<span class="block truncate text-[11px] text-muted-foreground">{listName(s)}</span>
+							</span>
 							<span class="order-3 col-span-2 flex min-w-0 items-center gap-1.5 text-muted-foreground sm:order-none sm:col-span-1">
 								{#if s.winner}
 									<Trophy class="size-3.5 shrink-0 text-sun" />
@@ -545,6 +486,7 @@
 	</section>
 </div>
 
+<!-- Start a live game: each game's own settings -->
 <Modal
 	open={startOpen}
 	size={isFlyGame(startFor) || startFor === 'word-heist' || startFor === 'scribble' ? 'md' : 'lg'}
@@ -553,186 +495,86 @@
 	onclose={() => !creating && (startFor = null)}
 >
 	{#if startFor === 'word-heist'}
-		<div class="space-y-4">
-			<Segmented
-				label="What are you running?"
-				bind:value={heistMode}
-				options={[
-					{ value: 'game', label: 'Create game' },
-					{ value: 'tournament', label: 'Create tournament' }
-				]}
-			/>
-
-			{#if heistMode === 'game'}
-				<p class="text-[13px] text-muted-foreground">One room, one round, {ROOM_MIN}–{ROOM_MAX} players. The top three make the podium.</p>
-				<SelectField label="Players (most)" bind:value={heist.gamePlayers} options={range(ROOM_MIN, ROOM_MAX).map(String)} />
-				{#if shapeError}<p class="text-[13px] text-destructive" role="alert">{shapeError}</p>{/if}
-			{:else}
-				<p class="text-[13px] text-muted-foreground">
-					A box you set is highlighted and stays as you set it (× to free it); the others are worked out to fit. If what you set can't work together, you'll be told which to change.
-				</p>
-				<div class="grid gap-3 sm:grid-cols-2">
-					<Field
-						label="Participants"
-						type="number"
-						inputmode="numeric"
-						min="2"
-						max={MAX_PLAYERS}
-						bind:value={heist.participants}
-						onchange={(e) => onShape('participants', e.currentTarget.value)}
-						locked={locked.includes('participants')}
-						onunlock={() => unlock('participants')}
-					/>
-					<SelectField label="Stages" bind:value={heist.stages} options={range(2, MAX_STAGES).map(String)} onchange={(v) => onShape('stages', v)} locked={locked.includes('stages')} onunlock={() => unlock('stages')} />
-					<SelectField label="Players per room (most)" bind:value={heist.roomSize} options={range(ROOM_MIN, ROOM_MAX).map(String)} onchange={(v) => onShape('roomSize', v)} locked={locked.includes('roomSize')} onunlock={() => unlock('roomSize')} />
-					<SelectField label="Go through per room" bind:value={heist.advance} options={range(1, Number(heist.roomSize) - 1).map(String)} onchange={(v) => onShape('advance', v)} locked={locked.includes('advance')} onunlock={() => unlock('advance')} />
-				</div>
-				{#if shapeError}
-					<p class="text-[13px] text-destructive" role="alert">{shapeError}</p>
-				{:else}
-				<p class="text-[13px] text-muted-foreground">
-					{#if heistMax}
-						Up to <button type="button" class="font-semibold text-foreground underline-offset-4 hover:underline tabular" onclick={() => onShape('participants', String(heistMax))}>{heistMax} participants</button> for
-						{heist.stages} stages, rooms of up to {heist.roomSize}, {heist.advance} going through from each room.
-					{:else}
-						{heist.stages} stages can't work with {heist.advance} going through from each room — send fewer through.
-					{/if}
-				</p>
-				{/if}
-			{/if}
-
-			{#if typeof heistPlan !== 'string'}
-				<ol class="space-y-1 rounded-md bg-muted px-3 py-2 text-[13px] text-muted-foreground" aria-label="Stages">
-					{#each heistPlan as st (st.stage)}
-						<li>
-							<span class="font-semibold text-foreground">{st.final ? (heistMode === 'game' ? 'Game' : 'Final') : `Stage ${st.stage}`}:</span>
-							<span class="tabular">{st.players} players · {describeSizes(st.sizes)}</span>{st.final ? ' · top 3 on the podium' : ` · top ${st.advance} from each room go through`}
-						</li>
-					{/each}
-				</ol>
-			{/if}
-
-			<div class="grid gap-3 sm:grid-cols-3">
-				<SelectField
-					label="Round length"
-					bind:value={heist.roundSeconds}
-					options={ROUND_SECONDS.map((s) => ({ value: String(s), label: durationLabel(s) }))}
-					onchange={(v) => ((heist.roundSeconds = v), recalcTiming())}
-				/>
-				<Field
-					label="Tiles per room"
-					type="number"
-					inputmode="numeric"
-					min={TILE_LIMITS[0]}
-					max={maxTiles}
-					hint="For a full room of {fullRoom} · up to {maxTiles}"
-					bind:value={heist.tiles}
-					onchange={(e) => onTiles(e.currentTarget.value)}
-					locked={locked.includes('tiles')}
-					onunlock={() => unlock('tiles')}
-				/>
-				<div class="flex flex-col gap-1.5">
-					<span class="text-[13px] font-medium text-foreground">New tile every</span>
-					<output class="flex h-9 items-center rounded-md border border-dashed border-input bg-muted/60 px-3 text-sm text-foreground tabular" aria-live="polite">
-						{Number.isFinite(heistPace) && heistPace > 0 ? `${heistPace.toFixed(1)} s` : '—'}
-					</output>
-					<span class="text-[13px] text-muted-foreground">Worked out from the two boxes</span>
-				</div>
-			</div>
-			{#if timingError}
-				<p class="text-[13px] text-destructive" role="alert">{timingError}</p>
-			{:else}
-				<p class="text-[13px] text-muted-foreground">
-					Tiles drop for <span class="font-medium text-foreground">{durationLabel(roundSeconds)}</span>, then a {finalSeconds} s final countdown —
-					<span class="font-medium text-foreground tabular">{formatClock((roundSeconds + finalSeconds) * 1000)}</span> a round in all.
-					{#each tileBands as b, i (b.label)}{i ? ' · ' : 'Rooms of '}<span class="font-medium text-foreground tabular">{b.label}</span>:
-						<span class="tabular">{b.count} tiles ({b.pace.toFixed(1)} s)</span>{/each}.
-				</p>
-			{/if}
-			<div class="grid gap-3 sm:grid-cols-2">
-				<SelectField
-					label="Final countdown"
-					bind:value={heist.finalSeconds}
-					options={FINAL_OPTIONS.map((s) => ({ value: String(s), label: s ? `${s} seconds, no new tiles` : 'None — end with the last tile' }))}
-				/>
-				<SelectField label="Shortest word" bind:value={heist.minWordLength} options={range(...RULE_LIMITS.minWordLength).map(String)} />
-			</div>
-			<ul class="space-y-1.5 text-[13px] text-muted-foreground">
-				<li>• Everyone scans one QR code and starts on 0. Letter tiles drop into a row shared by the room; words can only be made from those tiles.</li>
-				<li>• Steal any word by adding at least one tile to it (just adding S to the end doesn't count). Score = letters in the words you hold.</li>
-				<li>• Banned words are managed on the Word moderation page.</li>
-			</ul>
-			{#if createError}<p class="text-[13px] text-destructive" role="alert">{createError}</p>{/if}
-			{#if createError}<p class="text-[13px] text-destructive" role="alert">{createError}</p>{/if}
-		</div>
+		<WordHeistSetup mode="game" bind:rules={heistGame.rules} bind:problem={heistGame.problem} />
 	{:else if isFlyGame(startFor)}
-		<div class="space-y-4">
-			<SelectField label="Game length" bind:value={flapDuration} options={FLAP_DURATIONS.map((d) => ({ value: String(d), label: durationLabel(d) }))} />
-			<ul class="space-y-1.5 text-[13px] text-muted-foreground">
-				<li>• Players can practise in the lobby while they wait.</li>
-				<li>• Once you start, they fly as many times as they like until time runs out.</li>
-				<li>• Only each player’s <span class="font-medium text-foreground">best</span> flight counts — a worse one never lowers their score.</li>
-				<li>• The final leaderboard appears when the timer ends.</li>
-			</ul>
-			{#if createError}<p class="text-[13px] text-destructive" role="alert">{createError}</p>{/if}
-		</div>
+		<FlySetup bind:duration={flap.duration} />
 	{:else if startFor === 'scribble'}
-		<div class="space-y-5">
-			<Segmented label="Time to draw" bind:value={drawSeconds} options={DRAW_SECONDS.map((s) => ({ value: s, label: `${s} sec` }))} />
-			<Segmented label="Turns" bind:value={drawTurns} options={TURN_COUNTS.map((n) => ({ value: n, label: String(n) }))} />
-			<fieldset>
-				<legend class="text-[13px] font-medium text-foreground">Word packs</legend>
-				<div class="mt-1.5 grid gap-2 sm:grid-cols-3">
-					{#each PACKS as pack (pack.id)}
-						{@const on = drawPacks.includes(pack.id)}
-						<label class="flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 transition-colors {on ? 'border-ring bg-accent' : 'border-border hover:bg-muted'}">
-							<input type="checkbox" class="mt-0.5 accent-[var(--color-primary)]" checked={on} onchange={() => togglePack(pack.id)} />
-							<span>
-								<span class="block text-sm font-medium">{pack.name}</span>
-								<span class="block text-xs text-muted-foreground">{pack.description}</span>
-							</span>
-						</label>
-					{/each}
-				</div>
-			</fieldset>
-			<div>
-				<label for="custom-words" class="text-[13px] font-medium text-foreground">Your own words <span class="font-normal text-muted-foreground">(optional)</span></label>
-				<textarea
-					id="custom-words"
-					bind:value={customWords}
-					rows="3"
-					placeholder="symba, hackathon trophy, pitch deck…"
-					class="mt-1.5 w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none focus:border-ring focus:ring-4 focus:ring-ring/20"
-				></textarea>
-				<p class="mt-1 text-xs text-muted-foreground">Separate with commas or new lines. {customCount ? `${customCount} added.` : ''}</p>
-			</div>
-			<p class="rounded-md bg-muted px-3 py-2 text-[13px] text-muted-foreground">
-				<span class="font-semibold text-foreground tabular">{drawPool}</span> words ·
-				<span class="font-semibold text-foreground tabular">~{Math.ceil((drawTurns * (drawSeconds + 25)) / 60)} min</span> · needs 2+ players
-			</p>
-			{#if createError || drawProblem}<p class="text-[13px] text-destructive" role="alert">{createError || drawProblem}</p>{/if}
-		</div>
-	{:else}
-		<div class="space-y-5">
-			<Segmented
-				label="Time per word"
-				bind:value={duration}
-				options={[10, 15, 20, 25].map((s) => ({ value: s, label: `${s} sec` }))}
-			/>
-			<QuestionSetPicker bind:mode={questionMode} bind:questions={fixedQuestions} bind:problem={questionProblem} />
-			<p class="rounded-md bg-muted px-3 py-2 text-[13px] text-muted-foreground">
-				<span class="font-semibold text-foreground tabular">{wordCount}</span> words ·
-				<span class="font-semibold text-foreground tabular">~{Math.ceil((wordCount * duration) / 60)} min</span> answer time · up to
-				<span class="font-semibold text-foreground tabular">100 XP</span> per word
-			</p>
-			{#if createError}<p class="text-[13px] text-destructive" role="alert">{createError}</p>{/if}
-		</div>
+		<ScribbleSetup bind:drawSeconds={scribble.drawSeconds} bind:turns={scribble.turns} bind:packs={scribble.packs} bind:custom={scribble.custom} bind:problem={scribble.problem} />
+	{:else if startFor}
+		<TechWordRushSetup bind:duration={twr.duration} bind:questionMode={twr.questionMode} bind:questions={twr.questions} bind:problem={twr.problem} />
 	{/if}
+	{#if createError}<p class="mt-4 text-[13px] text-destructive" role="alert">{createError}</p>{/if}
 	{#snippet footer()}
 		<Button variant="ghost" onclick={() => (startFor = null)} disabled={creating}>Cancel</Button>
 		<Button onclick={start} loading={creating} disabled={blocked}>
-			{creating ? 'Creating…' : startFor === 'word-heist' ? (heistMode === 'game' ? 'Create game' : 'Create tournament') : 'Create lobby'}
+			{creating ? 'Creating…' : startFor === 'word-heist' ? 'Create game' : 'Create lobby'}
 		</Button>
+	{/snippet}
+</Modal>
+
+<!-- Create a tournament: the game, its own setup, then the tournament rules for that game -->
+<Modal open={tourOpen} size="lg" title="Create tournament" description="Pick a game, keep its own setup, and add the tournament rules on top." onclose={() => !tourCreating && (tourOpen = false)}>
+	<div class="space-y-6">
+		<fieldset>
+			<legend class="text-[13px] font-medium text-foreground">Game</legend>
+			<div class="mt-1.5 grid gap-2 sm:grid-cols-2 lg:grid-cols-3" role="radiogroup" aria-label="Game">
+				{#each GAMES as game (game.id)}
+					{@const on = tourGame === game.id}
+					{@const format = game.id === 'word-heist' ? 'rooms' : isTournamentGame(game.id) ? FORMAT_OF[game.id] : 'elimination'}
+					<button
+						type="button"
+						role="radio"
+						aria-checked={on}
+						onclick={() => ((tourGame = game.id), (tourError = ''))}
+						class="flex items-start gap-2 rounded-md border px-3 py-2 text-left transition-colors {on ? 'border-ring bg-accent' : 'border-border hover:bg-muted'}"
+					>
+						<span class="mt-0.5 grid size-4 shrink-0 place-items-center rounded-full border {on ? 'border-primary bg-primary text-primary-foreground' : 'border-input'}">{#if on}<Check class="size-3" />{/if}</span>
+						<span class="min-w-0">
+							<span class="block text-sm font-medium">{game.name}</span>
+							<span class="block text-xs text-muted-foreground">{formatLabel(format)}</span>
+						</span>
+					</button>
+				{/each}
+			</div>
+		</fieldset>
+
+		{#if tourGame}
+			<section class="space-y-3" aria-labelledby="setup-h">
+				<h3 id="setup-h" class="text-[13px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">{gameName(tourGame)} setup</h3>
+				{#if tourGame === 'word-heist'}
+					<WordHeistSetup mode="tournament" bind:rules={heistTour.rules} bind:problem={heistTour.problem} />
+				{:else if isFlyGame(tourGame)}
+					<FlySetup bind:duration={flap.duration} tournament />
+				{:else if tourGame === 'scribble'}
+					<ScribbleSetup bind:drawSeconds={scribble.drawSeconds} bind:turns={scribble.turns} bind:packs={scribble.packs} bind:custom={scribble.custom} bind:problem={scribble.problem} tournament />
+				{:else}
+					<TechWordRushSetup bind:duration={twr.duration} bind:words={twr.words} bind:problem={twr.problem} tournament />
+				{/if}
+			</section>
+
+			{#if tourGame !== 'word-heist'}
+				<section class="space-y-3 border-t border-border pt-5" aria-labelledby="rules-h">
+					<h3 id="rules-h" class="text-[13px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">Tournament rules · {formatLabel(tourFormat ?? 'elimination')}</h3>
+					{#if tourFormat === 'rooms'}
+						<RoomsRules limits={ROOMS_LIMITS} defaults={{ maxPlayers: 32, stages: 2, roomSize: DRAW_ROOM, advance: 2 }} bind:rules={rooms.rules} bind:problem={rooms.problem} />
+					{:else}
+						<EliminationRules bind:rules={elim.rules} bind:problem={elim.problem} />
+					{/if}
+				</section>
+			{/if}
+			<p class="rounded-md bg-muted px-3 py-2 text-[13px] text-muted-foreground">
+				Everyone registers once with one QR code. Each stage is a real {gameName(tourGame)} game run by its own rules{tourGame === 'word-heist'
+					? ' on the live server'
+					: tourFormat === 'rooms'
+						? ', one game per room'
+						: ' on the big screen'}; the top of each leaderboard goes through until the final decides the podium.
+			</p>
+		{/if}
+		{#if tourError}<p class="text-[13px] text-destructive" role="alert">{tourError}</p>{/if}
+	</div>
+	{#snippet footer()}
+		<Button variant="ghost" onclick={() => (tourOpen = false)} disabled={tourCreating}>Cancel</Button>
+		<Button onclick={createTour} loading={tourCreating} disabled={tourBlocked}>{tourCreating ? 'Creating…' : 'Create tournament'}</Button>
 	{/snippet}
 </Modal>
 

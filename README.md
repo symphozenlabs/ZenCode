@@ -11,7 +11,8 @@ Built with SvelteKit (Svelte 5) on Vercel, Firebase Authentication (organisers o
 | Registration (from `main`) | `/`, `/check-in/{teamId}`, `/api/registration/send-confirmation` | Anyone |
 | Admin | `/admin/login`, `/admin`, `/admin/hackathon`, `/admin/pitch-fest`, `/admin/settings`, `/admin/games` | Organisers |
 | Live games | `/join`, `/join/{code}` (players, no account) · `/admin/games/tech-word-rush/live/{code}` (presenter) | Players / organisers |
-| Word Heist tournament | `/join/heist/{code}` (players, one QR for everyone) · `/admin/games/word-heist/live/{code}`, `/admin/games/word-heist/moderation` | Players / organisers |
+| Word Heist | `/join/heist/{code}` (players, one QR for everyone) · `/admin/games/word-heist/live/{code}`, `/admin/games/word-heist/moderation` | Players / organisers |
+| Tournaments | `/join/t/{code}` (players, one QR for the whole tournament) · `/admin/games/tournament/live/{code}` (dashboard); Word Heist tournaments use its own dashboard | Players / organisers |
 | Live sessions | `/admin/live`, `/admin/live/{id}/present` (organisers) · `/join`, `/play/{code}` (phones, no account) | Organisers / anyone with the code |
 
 The registration site is `main`'s app, unchanged: `src/App.svelte`, `src/lib/*.svelte`, `src/lib/firebase.js`, `src/lib/server/*.js` and `src/site.css` (main's `src/app.css`). It's mounted by `src/routes/(registration)/` with SSR off, so it behaves exactly like the original single-page app. Keep those files in sync with `main` rather than editing them here.
@@ -45,7 +46,8 @@ Without `VITE_LIVE_ORIGIN` everything stays on the same host, which is what `npm
 - **Registrations** are written by the public form straight to `hackathon_registered_participants` / `pitchfest_registered_participants`; `firestore.rules` validates every new document. Admins can mark teams rejected, edit or delete them.
 - **Admin pages** sign in with the organiser account (or a user listed in `admins/{uid}`, see `npm run grant-admin`) and subscribe live to Firestore. Who counts as an admin is decided on the server (`/api/admin/check`).
 - **Live games** (Tech Word Rush) run on the server, signed in as the organiser from `.env` (`src/lib/server/admin-session.ts`). Every join, hint and guess is a Firestore transaction there (`src/lib/server/games/`), so players can't edit XP or read answers. Players get up to 3 guesses per word with no feedback; guesses are judged and XP paid when the host reveals the answer. Run `npm run test:games` for the scoring rules.
-- **Word Heist** is a multi-room word-stealing tournament that runs on the live server (`server.js`, WebSocket `/heist`) like live sessions: rooms are held in memory, every move is judged against a server-side dictionary and moderation and pushed to the room in milliseconds, and Firestore gets a batched copy every 2 s. See [docs/word-heist.md](docs/word-heist.md).
+- **Tournaments** run any game as a knockout from the Games page's Tournament module: the game keeps its own setup and rules, and the tournament adds participants, stages and who goes through — rooms for small-group games (Word Heist, Scribble), elimination for whole-room games (Tech Word Rush, Flappy, Symba). Each stage is made of real game sessions with the players pre-seated. See [docs/tournaments.md](docs/tournaments.md).
+- **Word Heist** is a multi-room word-stealing game that runs on the live server (`server.js`, WebSocket `/heist`) like live sessions: rooms are held in memory, every move is judged against a server-side dictionary and moderation and pushed to the room in milliseconds, and Firestore gets a batched copy every 2 s. See [docs/word-heist.md](docs/word-heist.md).
 
 ## Project layout
 
@@ -60,8 +62,8 @@ src/lib/live/                      Live sessions: data model, protocol, client s
 src/lib/server/live/               Live hub (WebSocket), repository, admin token check
 server.js                          Production entry: adapter-node handler + /live WebSocket
 src/routes/api/                    Admin check, games, confirmation email
-src/lib/games/                     Game rules, questions, client API
-src/lib/server/games/              Server-side game logic
+src/lib/games/                     Game rules, questions, client API (tournament/ = plans and rules)
+src/lib/server/games/              Server-side game logic (tournament.ts = stages, seating, results)
 src/lib/components/                Admin, games, motion and UI components
 firestore.rules                    Access boundaries
 ```

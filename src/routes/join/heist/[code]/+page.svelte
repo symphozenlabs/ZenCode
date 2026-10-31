@@ -1,15 +1,20 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import { tick, untrack } from 'svelte';
 	import { fade, fly, scale } from 'svelte/transition';
-	import { Timer, Pause, Wifi, WifiOff, Sparkles, Hourglass, Crown, Medal, DoorClosed } from '@lucide/svelte';
+	import { flip } from 'svelte/animate';
+	import { backOut } from 'svelte/easing';
+	import { Pause, Wifi, WifiOff, Sparkles, Hourglass, Crown, Medal, DoorClosed, Delete, CornerDownLeft, X } from '@lucide/svelte';
 	import { serverNow } from '$lib/games/tech-word-rush/api';
-	import { CODE_RE, formatClock } from '$lib/games/word-heist/types';
-	import { rankBoard, roundClock } from '$lib/games/word-heist/engine';
+	import { CODE_RE, formatClock, type FeedEntry } from '$lib/games/word-heist/types';
+	import { letterDiff, rankBoard, roundClock, takeTiles } from '$lib/games/word-heist/engine';
 	import { HeistClient } from '$lib/games/word-heist/client.svelte';
+	import type { BoardView } from '$lib/games/word-heist/protocol';
 	import { AVATARS, AVATAR_COUNT, avatarOf, colorOf, inkOn } from '$lib/games/word-heist/avatars';
 	import GameStage from '$lib/components/games/GameStage.svelte';
 	import XpCounter from '$lib/components/games/XpCounter.svelte';
+	import HeistStandings, { type Standing } from '$lib/components/games/HeistStandings.svelte';
 	import Logo from '$lib/components/site/Logo.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Spinner from '$lib/components/ui/Spinner.svelte';
@@ -106,36 +111,162 @@
 	const clock = $derived(board && board.status !== 'ready' ? roundClock(board.tiles, board.endsAt, board.pausedRemainingMs, now) : null);
 	const timeLeft = $derived(clock?.remainingMs ?? 0);
 	const live = $derived(board?.status === 'playing' && timeLeft > 0);
-	/** 0 → 1 as the next tile gets closer. */
-	const tileProgress = $derived(board && clock?.nextTileAt ? Math.min(1, Math.max(0, 1 - (clock.nextTileAt - now) / board.tiles.everyMs)) : 0);
+	/** How much of the round's tiles (or of the final countdown) is left, 0–1, for the ring. */
+	const ringLeft = $derived(
+		!board || !clock ? 1 : clock.finalCountdown ? Math.min(1, timeLeft / Math.max(1, board.rules.finalSeconds * 1000)) : clock.tilesLeft / Math.max(1, board.tiles.count)
+	);
 
-	// ── The table: everyone's avatar, colour and points; words in their colour ──
+	// ── The table as shown ───────────────────────────────────────────────
+	// Boards arrive the instant a move lands. They are applied one at a time
+	// so a move can play out first (Pilfer's steal: the word's letters rise to
+	// a staging row, the tiles it used fly in, the thief sweeps it away, and
+	// the new word drops into the list) while the table still shows the old
+	// state. Catching up after a reconnect skips the show.
+	let shown = $state<BoardView | null>(null);
+	let queue: BoardView[] = [];
+	let draining = false;
+	const reduceMotion = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+	$effect(() => {
+		const b = board;
+		if (!b) {
+			queue = [];
+			shown = null;
+			return;
+		}
+		queue.push(b);
+		void drain();
+	});
+	async function drain() {
+		if (draining) return;
+		draining = true;
+		try {
+			while (queue.length) {
+				const next = queue.shift()!;
+				const prev = untrack(() => shown);
+				const prevSeq = prev?.feed[0]?.seq ?? 0;
+				const sameRoom = !!prev && prev.roomId === next.roomId && prev.round === next.round;
+				const moves = sameRoom && !reduceMotion && queue.length < 2 ? next.feed.filter((f) => f.seq > prevSeq).sort((a, b) => a.seq - b.seq) : [];
+				if (moves.length === 1) await animateMove(moves[0], prev!).catch(() => {});
+				shown = next;
+			}
+		} finally {
+			draining = false;
+			clearStage();
+		}
+	}
+
+	// ── Screen ───────────────────────────────────────────────────────────
+	// Phones get 7 tiles to a row and the on-screen keyboard (the phone's own
+	// keyboard never opens); tablets and computers get up to 14 to a row.
+	let wide = $state(false);
+	let touch = $state(false);
+	$effect(() => {
+		const w = matchMedia('(min-width: 640px)');
+		const t = matchMedia('(pointer: coarse)');
+		const update = () => {
+			wide = w.matches;
+			touch = t.matches;
+		};
+		update();
+		w.addEventListener('change', update);
+		t.addEventListener('change', update);
+		return () => {
+			w.removeEventListener('change', update);
+			t.removeEventListener('change', update);
+		};
+	});
+
+	// ── Tiles keep their place ───────────────────────────────────────────
+	// 7 (or 14) to a row. A tile stays in its slot until it is used; the slot
+	// is then left empty and the next tile to drop fills the first empty slot.
+	// Rows are padded to a full row, and empty rows at the bottom are dropped.
+	const COLS = $derived(wide ? 14 : 7);
+	let slotIds = $state<(number | null)[]>([]);
+	let slotsRoom = '';
+	$effect(() => {
+		const b = shown;
+		const pool = b?.pool ?? [];
+		const roomKey = b ? `${b.roomId}:${b.round}` : '';
+		const current = untrack(() => (roomKey === slotsRoom ? slotIds : []));
+		slotsRoom = roomKey;
+		const have = new Set(pool.map((t) => t.id));
+		const next: (number | null)[] = current.map((id) => (id !== null && have.has(id) ? id : null));
+		const placed = new Set(next.filter((x): x is number => x !== null));
+		for (const t of pool) {
+			if (placed.has(t.id)) continue;
+			const i = next.indexOf(null);
+			if (i >= 0) next[i] = t.id;
+			else next.push(t.id);
+			placed.add(t.id);
+		}
+		let last = next.length - 1;
+		while (last >= 0 && next[last] === null) last--;
+		const rows = Math.max(1, Math.ceil((last + 1) / COLS));
+		next.length = Math.min(next.length, rows * COLS);
+		while (next.length < rows * COLS) next.push(null);
+		if (next.length !== current.length || next.some((id, i) => id !== current[i])) slotIds = next;
+	});
+	const tileById = $derived(new Map((shown?.pool ?? []).map((t) => [t.id, t])));
+	const slots = $derived(slotIds.map((id) => (id === null ? null : (tileById.get(id) ?? null))));
+
+	// The grid always fits the space it has: tiles shrink as rows are added,
+	// and only scroll once they would be too small to read.
+	const GAP = $derived(wide ? 6 : 4);
+	const MIN_TILE = 22;
+	let gridBox = $state<{ w: number; h: number } | null>(null);
+	const measureGrid = (el: HTMLElement) => {
+		const ro = new ResizeObserver(([e]) => (gridBox = { w: e.contentRect.width, h: e.contentRect.height }));
+		ro.observe(el);
+		return () => ro.disconnect();
+	};
+	const gridRows = $derived(Math.max(1, Math.ceil(slotIds.length / COLS)));
+	const tileSize = $derived.by(() => {
+		if (!gridBox) return 36;
+		const byWidth = (gridBox.w - (COLS - 1) * GAP) / COLS;
+		const byHeight = (gridBox.h - (gridRows - 1) * GAP) / gridRows;
+		return Math.floor(Math.max(MIN_TILE, Math.min(wide ? 60 : 50, byWidth, byHeight)));
+	});
+	const gridFits = $derived(!gridBox || gridRows * tileSize + (gridRows - 1) * GAP <= gridBox.h + 1);
+
+	// ── Players: avatar, colour, points ──────────────────────────────────
+	// From the live board, so points change the moment a move lands (as in
+	// Pilfer), while the table below still plays the move out.
 	type Seat = { id: string; name: string; score: number; avatar: string; color: string; mine: boolean };
 	const seats = $derived.by<Seat[]>(() => {
-		if (!board) return [];
-		return Object.entries(board.players)
+		const b = board;
+		if (!b) return [];
+		return Object.entries(b.players)
 			.map(([id, p], i) => ({ id, p, seat: p.seat ?? i }))
 			.filter(({ p }) => !p.removed)
-			.sort((a, b) => a.seat - b.seat)
+			.sort((a, b) => Number(b.id === identity?.playerId) - Number(a.id === identity?.playerId) || a.seat - b.seat)
 			.map(({ id, p, seat }) => ({ id, name: p.name, score: p.score, avatar: avatarOf(p.avatar ?? seat), color: colorOf(seat), mine: id === identity?.playerId }));
 	});
-	// You top-left; everyone else alternates right, left, right… (like two sides of a table).
-	const others = $derived(seats.filter((p) => !p.mine));
-	const leftSeats = $derived([...seats.filter((p) => p.mine), ...others.filter((_, i) => i % 2 === 1)]);
-	const rightSeats = $derived(others.filter((_, i) => i % 2 === 0));
 	const seatById = $derived(new Map(seats.map((p) => [p.id, p])));
+	/** The room's ranking with each player's avatar and colour, for the standings after a round. */
+	const standings = $derived.by<Standing[]>(() => {
+		const b = board;
+		if (!b) return [];
+		const ids = Object.keys(b.players);
+		return ranking.map((r) => {
+			const p = b.players[r.playerId];
+			const seat = p?.seat ?? ids.indexOf(r.playerId);
+			return { id: r.playerId, name: r.name, score: r.score, longest: r.longest, rank: r.rank, avatar: avatarOf(p?.avatar ?? seat), color: colorOf(seat), mine: r.playerId === identity?.playerId };
+		});
+	});
+	/** Players sit down the two edges of the screen, as in Pilfer: you top-left, the others alternating right and left. */
+	const rails = $derived([seats.filter((_, i) => i % 2 === 0), seats.filter((_, i) => i % 2 === 1)]);
+	const crowded = $derived(rails[0].length > 4);
 
-	/** Tap an avatar to light up that player's words. */
-	let focusId = $state<string | null>(null);
-	/** Words just made or stolen glow for a moment. */
-	const FRESH_MS = 2_500;
+	/** Everyone's words, oldest first, in their owner's colour. A word being stolen leaves the list the moment its letters lift off. */
 	const tableWords = $derived.by(() => {
-		if (!board) return [];
-		return Object.entries(board.words)
-			.sort(([, a], [, b]) => a.at - b.at)
+		const b = shown;
+		if (!b) return [];
+		return Object.entries(b.words)
+			.filter(([id]) => id !== hiddenWord)
+			.sort(([, a], [, c]) => a.at - c.at)
 			.map(([id, w]) => {
 				const owner = seatById.get(w.owner);
-				return { id, text: w.text, owner: w.owner, ownerName: owner?.name ?? '—', color: owner?.color ?? '#888888', mine: w.owner === identity?.playerId, fresh: now - w.at < FRESH_MS };
+				return { id, text: w.text, owner: w.owner, color: owner?.color ?? '#888888', mine: w.owner === identity?.playerId };
 			});
 	});
 
@@ -156,97 +287,287 @@
 		lastScores = next;
 	});
 
+	// ── The move animation (timed from Pilfer's own) ─────────────────────
+	// The screen floods with the mover's colour. The letters come together in
+	// a staging row under the grid: a stolen word's letters lift out of the
+	// list, the tiles it used fly in from the grid (their slots go dark), the
+	// mover's avatar sweeps across and each letter it passes takes their
+	// colour, the row sinks away, and the word pops into the list.
+	const EASE = 'cubic-bezier(.45,1.45,.8,1)';
+	const STEP_MS = 200;
+	const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+	let overlay = $state<HTMLDivElement>();
+	/** The staging row: one (invisible) cell per letter of the word being made; the flying letters sit on top. */
+	let staging = $state<{ n: number; out: boolean } | null>(null);
+	/** Colour wash behind the board while someone's move plays. */
+	let glow = $state<string | null>(null);
+	/** Whose seat is sliding out as a banner (Pilfer's mover banner). */
+	let mover = $state<string | null>(null);
+	/** "Yes!!" for the mover, "Ouch!" for whoever lost a word. */
+	let reactions = $state<Record<string, { text: string; key: number }>>({});
+	let hiddenWord = $state<string | null>(null);
+	let hiddenTiles = $state<number[]>([]);
+	let clones: HTMLElement[] = [];
+
+	function clearStage() {
+		for (const c of clones) c.remove();
+		clones = [];
+		staging = null;
+		hiddenWord = null;
+		hiddenTiles = [];
+	}
+	function react(id: string | undefined, text: string) {
+		if (!id) return;
+		const key = Date.now() + Math.random();
+		reactions[id] = { text, key };
+		setTimeout(() => reactions[id]?.key === key && delete reactions[id], 2_500);
+	}
+
+	/** A copy of a letter box, fixed over `r`, that can be flown around. */
+	function cloneBox(r: DOMRect, text: string, bg: string, ink: string): HTMLElement {
+		const el = document.createElement('span');
+		el.textContent = text;
+		el.className = 'grid place-items-center rounded font-display font-bold will-change-transform';
+		Object.assign(el.style, { position: 'fixed', left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px`, fontSize: `${r.height * 0.55}px`, background: bg, color: ink, transformOrigin: 'top left', zIndex: '50' });
+		overlay?.appendChild(el);
+		clones.push(el);
+		return el;
+	}
+	/** Fly a clone (whose box is `home`) from where `at` put it to `to`. */
+	function flyTo(el: HTMLElement, home: DOMRect, at: DOMRect | null, to: DOMRect, delay = 0, duration = STEP_MS) {
+		const tf = (r: DOMRect) => `translate(${r.left - home.left}px, ${r.top - home.top}px) scale(${r.width / home.width}, ${r.height / home.height})`;
+		return el.animate([{ transform: at ? tf(at) : 'translate(0, 0) scale(1)' }, { transform: tf(to) }], { duration, delay, easing: EASE, fill: 'forwards' }).finished;
+	}
+
+	async function animateMove(f: FeedEntry, prev: BoardView) {
+		const thief = seatById.get(f.by);
+		if (!thief || !overlay) return;
+		const text = f.text;
+		// The word it came from (stolen, or the thief's own), and the tiles it added.
+		const srcId = f.from ? (Object.entries(prev.words).find(([, w]) => w.text === f.from && w.owner === (f.victim ?? f.by))?.[0] ?? null) : null;
+		const added = srcId ? letterDiff(f.from!, text).added : [...text];
+		const tiles = takeTiles(prev.pool, added) ?? [];
+		// Where each old letter and each tile ends up in the new word.
+		const used = new Array<boolean>(text.length).fill(false);
+		const indexFor = (c: string) => {
+			const i = [...text].findIndex((ch, k) => ch === c && !used[k]);
+			if (i >= 0) used[i] = true;
+			return i;
+		};
+		const srcMap = srcId ? [...f.from!].map(indexFor) : [];
+		const tileMap = tiles.map((t) => indexFor(t.c));
+
+		// The screen takes the mover's colour for the whole move.
+		glow = thief.color;
+		mover = thief.id;
+		staging = { n: text.length, out: false };
+		await tick();
+		const cells = [...document.querySelectorAll<HTMLElement>('[data-stage-cell]')].map((el) => el.getBoundingClientRect());
+		if (cells.length !== text.length) {
+			glow = null;
+			mover = null;
+			return;
+		}
+		try {
+			await wait(STEP_MS);
+			// 1. A stolen word's letters lift out of the list to the staging row, in their own order.
+			const letterClones: { el: HTMLElement; home: DOMRect; at: DOMRect }[] = [];
+			if (srcId) {
+				const victim = seatById.get(f.victim ?? f.by);
+				const boxes = [...document.querySelectorAll<HTMLElement>(`[data-word="${srcId}"] [data-letter]`)];
+				if (boxes.length === f.from!.length) {
+					const color = victim?.color ?? '#888888';
+					boxes.forEach((el, i) => letterClones.push({ el: cloneBox(el.getBoundingClientRect(), f.from![i], color, inkOn(color)), home: el.getBoundingClientRect(), at: cells[i] }));
+					hiddenWord = srcId; // the list closes the gap at once
+					await Promise.all(letterClones.map((c, i) => flyTo(c.el, c.home, null, cells[i], 0, 300)));
+					await wait(STEP_MS);
+				}
+			}
+			// 2. They re-sort into the new word while the tiles it used fly in from the grid.
+			const tileClones = tiles.flatMap((t, j) => {
+				const el = document.querySelector<HTMLElement>(`[data-tile="${t.id}"]`);
+				if (!el || tileMap[j] < 0) return [];
+				const home = el.getBoundingClientRect();
+				return [{ el: cloneBox(home, t.c, 'var(--color-sun-light)', 'var(--color-stage)'), home, to: cells[tileMap[j]] }];
+			});
+			hiddenTiles = tiles.map((t) => t.id); // their slots go dark
+			await Promise.all([
+				...letterClones.map((c, i) => (srcMap[i] >= 0 ? flyTo(c.el, c.home, c.at, cells[srcMap[i]]) : Promise.resolve())),
+				...tileClones.map((c) => flyTo(c.el, c.home, null, c.to))
+			]);
+			await wait(2 * STEP_MS);
+			// 3. The mover's avatar sweeps across; every letter it passes takes their colour.
+			const byIndex = new Map<number, HTMLElement>();
+			letterClones.forEach((c, i) => srcMap[i] >= 0 && byIndex.set(srcMap[i], c.el));
+			tileClones.forEach((c, j) => byIndex.set(tileMap[j], c.el));
+			// It leaves its seat, runs along the row and goes home again.
+			const sweep = document.createElement('span');
+			sweep.textContent = thief.avatar;
+			sweep.className = 'grid place-items-center drop-shadow-[0_6px_10px_rgb(0_0_0/0.5)]';
+			const size = cells[0].height * 1.15;
+			const start = { x: cells[0].left - size, y: cells[0].top + cells[0].height / 2 - size / 2 };
+			Object.assign(sweep.style, { position: 'fixed', left: `${start.x}px`, top: `${start.y}px`, width: `${size}px`, height: `${size}px`, fontSize: `${size * 0.8}px`, zIndex: '51', willChange: 'transform' });
+			overlay.appendChild(sweep);
+			clones.push(sweep);
+			const seatEl = document.querySelector<HTMLElement>(`[data-seat-avatar="${f.by}"]`)?.getBoundingClientRect();
+			const home = seatEl ? `translate(${seatEl.left + seatEl.width / 2 - start.x - size / 2}px, ${seatEl.top + seatEl.height / 2 - start.y - size / 2}px) scale(.7)` : 'translate(0, 0) scale(0)';
+			await sweep.animate([{ transform: home, opacity: seatEl ? 1 : 0 }, { transform: 'translate(0, 0) scale(1)', opacity: 1 }], { duration: 320, easing: 'cubic-bezier(.3,1.3,.6,1)', fill: 'forwards' }).finished;
+			for (let i = 0; i < cells.length; i++) {
+				const dx = cells[i].left + cells[i].width / 2 - (start.x + size / 2);
+				sweep.animate([{ transform: `translate(${dx}px, 0) rotate(${i % 2 ? 8 : -8}deg)` }], { duration: 100, easing: 'linear', fill: 'forwards' });
+				const box = byIndex.get(i);
+				box?.animate([{ background: thief.color, color: inkOn(thief.color) }], { duration: 100, fill: 'forwards' });
+				box?.animate([{ scale: '1.15' }, { scale: '1' }], { duration: 260, easing: EASE });
+				await wait(100);
+			}
+			await wait(120);
+			// 4. The row sinks away together while the avatar flies home; the new word then pops into the list.
+			if (staging) staging.out = true;
+			const last = cells[cells.length - 1];
+			const end = `translate(${last.left + last.width / 2 - start.x - size / 2}px, 0)`;
+			await Promise.all([
+				sweep.animate([{ transform: end, opacity: 1 }, { transform: home, opacity: seatEl ? 1 : 0 }], { duration: 360, easing: 'cubic-bezier(.5,0,.3,1)', fill: 'forwards' }).finished,
+				...[...letterClones, ...tileClones].map((c) => c.el.animate([{ opacity: 1, translate: '0 0' }, { opacity: 0, translate: '0 18px' }], { duration: 220, fill: 'forwards', composite: 'add' }).finished)
+			]);
+			react(f.by, 'Yes!!');
+			if (f.victim && f.victim !== f.by) react(f.victim, 'Ouch!');
+		} finally {
+			clearStage();
+			setTimeout(() => (glow = null), 300);
+			setTimeout(() => mover === thief.id && (mover = null), 450);
+		}
+	}
+
 	// ── Moves ────────────────────────────────────────────────────────────
 	let input = $state('');
 	let sending = $state(false);
-	let feedback = $state<{ tone: 'ok' | 'error'; text: string } | null>(null);
-	let inputEl = $state<HTMLInputElement>();
-	/** While the word box has focus (the phone keyboard is up), drop the help line to save room. */
-	let typing = $state(false);
+	let error = $state<{ text: string; key: number } | null>(null);
+	let wordEl = $state<HTMLDivElement>();
 
-	// The round screen fits the space above the keyboard: the board scrolls, the word box stays put.
+	// The round screen fills the screen exactly: header, board, word box and keyboard, no page scroll.
 	let fit = $state(false);
 	const fitRound = () => {
 		fit = true;
 		return () => (fit = false);
 	};
 
-	async function submit(e: SubmitEvent) {
-		e.preventDefault();
+	async function play() {
 		if (!client || !identity || sending || !live) return;
 		const text = input.trim();
-		if (!text) {
-			feedback = { tone: 'error', text: 'Type a word.' };
-			return;
-		}
+		if (!text) return;
 		sending = true;
-		feedback = null;
 		const result = await client!.move(text);
 		sending = false;
 		if (result.ok) {
-			feedback = { tone: 'ok', text: result.message };
-			input = '';
-			celebrate(result.gained ?? 0);
+			if (input === text) input = '';
+			error = null;
 		} else {
-			feedback = { tone: 'error', text: result.message };
+			const key = Date.now();
+			error = { text: result.message, key };
+			setTimeout(() => error?.key === key && (error = null), 2_500);
+			// The word box shakes its head (Pilfer's ±30px, six quick steps), then empties for the next try.
+			const clear = () => input === text && (input = '');
+			if (reduceMotion || !wordEl) clear();
+			else wordEl.animate([0, -30, 30, -30, 30, -30, 0].map((x) => ({ transform: `translateX(${x}px)` })), { duration: 600, easing: 'ease-in-out' }).finished.then(clear, clear);
 		}
-		inputEl?.focus();
 	}
 
-	let burst = $state<{ id: number; text: string } | null>(null);
-	function celebrate(points: number) {
-		const id = Date.now();
-		burst = { id, text: `+${points}` };
-		setTimeout(() => burst?.id === id && (burst = null), 1400);
+	// ── Typing: the on-screen keyboard, or a real one ────────────────────
+	const MAX_WORD = 20;
+	const KEY_ROWS = [[...'QWERTYUIOP'], [...'ASDFGHJKL', 'back'], [...'ZXCVBNM', 'enter']];
+	/** The key lit by a real keyboard, so typing there shows on screen too. */
+	let lit = $state<string | null>(null);
+	function press(k: string) {
+		if (!live) return;
+		lit = k;
+		setTimeout(() => lit === k && (lit = null), 120);
+		if (k === 'enter') void play();
+		else if (k === 'back') input = input.slice(0, -1);
+		else if (k === 'clear') input = '';
+		else if (input.length < MAX_WORD) input += k;
+	}
+	function onKey(e: KeyboardEvent) {
+		if (!fit || e.ctrlKey || e.metaKey || e.altKey) return;
+		const target = e.target as HTMLElement | null;
+		if (target?.closest?.('input, textarea, select, [contenteditable]')) return;
+		if (/^[a-z]$/i.test(e.key)) press(e.key.toUpperCase());
+		else if (e.key === 'Backspace') press('back');
+		else if (e.key === 'Escape') press('clear');
+		else if (e.key === 'Enter' && !target?.closest?.('button')) press('enter');
+		else return;
+		e.preventDefault();
+	}
+	/** A tap types on press (no 300 ms wait); a key reached with Tab/Enter still works as a click. */
+	function keyDown(e: PointerEvent, k: string) {
+		e.preventDefault();
+		press(k);
+	}
+	function keyClick(e: MouseEvent, k: string) {
+		if (e.detail === 0) press(k);
 	}
 
-	// Tell the player when someone steals from them.
-	let alert = $state<{ id: number; text: string } | null>(null);
-	let seenSeq = 0;
-	$effect(() => {
-		const latest = board?.feed[0];
-		if (!latest || !identity) return;
-		if (seenSeq && latest.seq > seenSeq) {
-			const hits = board!.feed.filter((f) => f.seq > seenSeq && f.victim === identity!.playerId);
-			if (hits.length) {
-				const h = hits[0];
-				alert = { id: h.seq, text: `${h.byName} stole ${h.from} → ${h.text}` };
-				setTimeout(() => alert?.id === h.seq && (alert = null), 3500);
-			}
-		}
-		seenSeq = latest.seq;
-	});
+	// ── Tiles left (or the final countdown) for the ring in the header ───
+	const ringValue = $derived(!board ? 0 : board.status === 'ready' ? board.tiles.count : clock?.finalCountdown ? Math.ceil(timeLeft / 1000) : (clock?.tilesLeft ?? board.tiles.count));
 
 	const placeLabel = (n: number) => (n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`);
 </script>
 
 <svelte:head><title>Word Heist · {code} — ZenCode</title></svelte:head>
+<svelte:window onkeydown={onKey} />
 
 <GameStage {fit}>
-	<header class="sticky top-0 z-20 flex items-center gap-3 border-b border-white/10 bg-stage/85 px-4 py-3 backdrop-blur">
+	<header class="sticky top-0 z-20 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 border-b border-white/10 bg-stage/85 backdrop-blur {fit ? 'px-3 py-1.5 sm:px-4' : 'px-4 py-3'}">
 		<div class="min-w-0">
-			<p class="font-display text-sm leading-tight font-bold tracking-[0.14em] uppercase">Word Heist</p>
-			<p class="font-mono text-[11px] tracking-[0.2em] text-cream/50">
+			<p class="truncate font-display text-sm leading-tight font-bold tracking-[0.14em] uppercase">Word Heist</p>
+			<p class="truncate font-mono text-[11px] text-cream/50 {fit ? 'tracking-[0.08em]' : 'tracking-[0.2em]'}">
 				{code}{#if session && session.round > 0} · {session.final ? 'Final' : `Round ${session.round}`}{/if}{#if me?.roomNumber && inRound} · Room {me.roomNumber}{/if}
 			</p>
 		</div>
-		{#if offline}
-			<span class="ml-auto inline-flex items-center gap-1 rounded-md bg-attention/15 px-2 py-1 text-xs font-semibold text-attention" role="status"><WifiOff class="size-3.5" /> Reconnecting…</span>
-		{/if}
-		{#if inRound && myEntry}
-			<div class="relative {offline ? '' : 'ml-auto'} flex items-baseline gap-1 rounded-md border border-green-300/30 bg-forest-900/70 px-3 py-1.5" aria-live="polite">
-				<XpCounter value={myEntry.score} class="font-display text-lg font-bold text-cream" />
-				<span class="text-xs font-semibold text-cream/60">pts</span>
-				{#if burst}
-					{#key burst.id}
-						<span class="absolute -bottom-7 right-2 font-display text-base font-bold text-green-300" in:fly={{ y: -8, duration: 260 }} out:fade={{ duration: 300 }}>{burst.text}</span>
+		<!-- Tiles left (the final countdown once the bag is empty): the round's clock, as in Pilfer's header -->
+		{#if fit && board}
+			{@const final = !!clock?.finalCountdown}
+			<div class="flex flex-col items-center" role="timer" aria-label={final ? `${formatClock(timeLeft)} left` : `${ringValue} tiles left`}>
+				{#key final}
+					<span class="rounded-full px-2 font-display text-[10px] leading-4 font-bold tracking-[0.14em] uppercase {final ? 'bg-sun text-stage' : 'text-sun'}" in:scale={{ start: 0.6, duration: 300, easing: backOut }}>{final ? 'Final countdown!' : 'Tiles left'}</span>
+				{/key}
+				<div class="relative mt-0.5 grid size-11 place-items-center {final && live ? 'ring-urgent' : ''}">
+					<svg viewBox="0 0 40 40" class="absolute inset-0 -rotate-90" aria-hidden="true">
+						<circle cx="20" cy="20" r="16.5" fill="none" stroke="currentColor" stroke-width="3.5" class="text-white/10" />
+						<circle
+							cx="20"
+							cy="20"
+							r="16.5"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="3.5"
+							stroke-linecap="round"
+							pathLength="100"
+							stroke-dasharray="{ringLeft * 100} 100"
+							class="ring-arc transition-[stroke-dasharray] duration-500 ease-out {final ? 'text-attention' : 'text-sun'}"
+						/>
+					</svg>
+					{#key ringValue}
+						<span class="relative font-display text-lg font-bold tabular {final ? 'text-attention' : 'text-cream'}" in:scale={{ start: 1.35, duration: 280, easing: backOut }}>{ringValue}</span>
 					{/key}
-				{/if}
+				</div>
 			</div>
+		{:else}
+			<span></span>
 		{/if}
+		<div class="flex min-w-0 items-center justify-end gap-2">
+			{#if offline}
+				<span class="inline-flex items-center gap-1 rounded-md bg-attention/15 px-2 py-1 text-xs font-semibold text-attention" role="status"><WifiOff class="size-3.5" /> <span class={fit ? 'sr-only sm:not-sr-only' : ''}>Reconnecting…</span></span>
+			{/if}
+			{#if inRound && myEntry}
+				<div class="flex items-baseline gap-1 rounded-md border border-green-300/30 bg-forest-900/70 {fit ? 'px-2.5 py-1' : 'px-3 py-1.5'}" aria-live="polite">
+					<XpCounter value={myEntry.score} class="font-display text-lg font-bold text-cream" />
+					<span class="text-xs font-semibold text-cream/60">pts</span>
+				</div>
+			{/if}
+		</div>
 	</header>
 
-	<main class="mx-auto flex w-full max-w-4xl flex-1 flex-col px-3 sm:px-4 {fit ? 'min-h-0 pt-3 pb-3' : 'pt-5 pb-8'}">
+	<main class="mx-auto flex w-full max-w-4xl flex-1 flex-col px-3 sm:px-4 {fit ? 'min-h-0' : 'pt-5 pb-8'}">
 		{#if loadState === 'loading'}
 			<div class="m-auto flex items-center gap-3 text-cream/70" role="status"><Spinner /> {offline ? 'Reconnecting…' : 'Loading…'}</div>
 		{:else if loadState === 'missing'}
@@ -366,7 +687,7 @@
 			</div>
 		{:else if (me.status === 'eliminated' || me.status === 'qualified' || me.status === 'tied' || me.status === 'champion') && (status === 'review' || status === 'finished' || me.round < session.round || (status === 'ready' && !inRound))}
 			<!-- ROUND RESULT -->
-			<div class="m-auto w-full max-w-md text-center">
+			<div class="m-auto w-full max-w-md py-4 text-center">
 				{#if me.status === 'champion'}
 					<Crown class="mx-auto size-14 text-sun" />
 					<p class="mt-3 font-display text-5xl font-bold uppercase" in:scale={{ start: 0.7, duration: 420 }}>Champion!</p>
@@ -386,16 +707,10 @@
 					<p class="font-display text-3xl font-bold uppercase">Thanks for playing</p>
 					<p class="mt-2 text-cream/70">You didn't go through this time{myEntry ? ` — you finished #${myEntry.rank} in Room ${me.roomNumber}` : ''}.</p>
 				{/if}
-				{#if ranking.length && me.round === session.round}
-					<ol class="mt-8 space-y-1.5 text-left" aria-label="Room ranking">
-						{#each ranking as r (r.playerId)}
-							<li class="flex items-center gap-3 rounded-lg border px-4 py-2 {r.playerId === identity.playerId ? 'border-sun/60 bg-sun/10' : 'border-stage-line bg-stage-raised/80'}">
-								<span class="w-6 font-mono text-sm text-cream/60 tabular">{r.rank}</span>
-								<span class="min-w-0 flex-1 truncate font-semibold">{r.name}</span>
-								<span class="font-display font-bold tabular">{r.score}</span>
-							</li>
-						{/each}
-					</ol>
+				{#if standings.length && me.round === session.round}
+					<div class="mt-8">
+						<HeistStandings entries={standings} final={session.final} advance={session.rules.advance} title={session.final ? 'Final standings' : `Room ${me.roomNumber} standings`} />
+					</div>
 				{/if}
 			</div>
 		{:else if status === 'scoring' || (inRound && board?.status === 'finished')}
@@ -403,163 +718,171 @@
 				<p class="font-display text-4xl font-bold uppercase">Round over</p>
 				<p class="mt-3 flex items-center justify-center gap-2 text-cream/70"><Spinner class="size-4" /> Counting the scores…</p>
 			</div>
-		{:else if inRound && board}
-			<!-- ROUND (ready / playing / paused): avatars down both sides, the table in the middle -->
-			{#snippet seat(p: Seat)}
-				<button
-					type="button"
-					onclick={() => (focusId = focusId === p.id ? null : p.id)}
-					aria-pressed={focusId === p.id}
-					aria-label="{p.mine ? 'You' : p.name}: {p.score} points. Show their words."
-					class="flex w-full flex-col items-center gap-1 rounded-lg py-1 transition-opacity {focusId && focusId !== p.id ? 'opacity-45' : ''}"
-				>
-					<span
-						class="relative grid size-11 place-items-center rounded-full text-2xl sm:size-14 sm:text-3xl"
-						style="background: {p.color}26; box-shadow: 0 0 0 3px {p.color}{p.mine ? ', 0 0 18px ' + p.color + '99' : ''}"
-					>
-						<span aria-hidden="true">{p.avatar}</span>
-						{#if deltas[p.id]}
-							{#key deltas[p.id].key}
-								<span
-									class="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full px-1.5 font-display text-xs font-bold whitespace-nowrap shadow {deltas[p.id].v > 0 ? 'bg-green-300 text-stage' : 'bg-attention text-white'}"
-									in:fly={{ y: 6, duration: 220 }}
-									out:fade={{ duration: 300 }}>{deltas[p.id].v > 0 ? '+' : ''}{deltas[p.id].v}</span
-								>
-							{/key}
-						{/if}
-					</span>
-					<span class="w-full truncate text-center text-[10px] font-semibold text-cream/80 sm:text-xs">{p.mine ? 'You' : p.name}</span>
-					<span class="min-w-7 rounded-full px-1.5 text-center font-display text-sm font-bold tabular" style="background: {p.color}; color: {inkOn(p.color)}">{p.score}</span>
-				</button>
-			{/snippet}
+		{:else if inRound && board && shown}
+			<!-- ROUND (ready / playing / paused) -->
+			<div class="relative isolate -mx-3 flex min-h-0 flex-1 flex-col sm:-mx-4">
+				<!-- The whole screen floods with the mover's colour while their move plays -->
+				<div
+					class="pointer-events-none fixed inset-0 -z-10 transition-opacity duration-500 ease-out {glow ? 'opacity-100' : 'opacity-0'}"
+					style="background: radial-gradient(ellipse 90% 70% at 50% 42%, {glow ?? 'transparent'}d9, {glow ?? 'transparent'}66 50%, transparent 100%)"
+					aria-hidden="true"
+				></div>
+				<div class="flex min-h-0 flex-1" {@attach fitRound}>
+					<!-- Players down both edges of the screen -->
+					{#each rails as rail, side (side)}
+						<ul class="relative z-10 flex shrink-0 flex-col pt-3 {side ? 'order-3 items-end' : 'items-start'} {crowded ? 'w-11 gap-1 sm:w-16' : 'w-13 gap-3 sm:w-20 sm:gap-4'}" aria-label={side ? 'Players' : 'You and players'}>
+							{#each rail as p (p.id)}
+								{@const size = crowded ? (wide ? 44 : 34) : wide ? 60 : 46}
+								<li animate:flip={{ duration: 400 }} class="relative flex flex-col {side ? 'items-end' : 'items-start'}" aria-label="{p.mine ? 'You' : p.name}: {p.score} points">
+									<!-- The seat: a half pill hugging the edge that slides out as a banner while its player moves -->
+									<span
+										class="seat relative flex items-center {side ? 'flex-row-reverse rounded-l-full pl-1' : 'rounded-r-full pr-1'} {p.mine ? 'seat-mine' : ''}"
+										style="--seat: {p.color}; height: {size}px; width: {size + 8 + (mover === p.id ? (wide ? 72 : 48) : 0)}px"
+									>
+										<span class="flex-1"></span>
+										<span data-seat-avatar={p.id} aria-hidden="true" class="grid shrink-0 place-items-center drop-shadow-[0_2px_3px_rgb(0_0_0/0.45)] transition-transform duration-300 {mover === p.id ? 'scale-110' : ''}" style="width: {size - 6}px; font-size: {size * 0.6}px">{p.avatar}</span>
+										{#if deltas[p.id] || reactions[p.id]}
+											{#key `${deltas[p.id]?.key ?? ''}${reactions[p.id]?.key ?? ''}`}
+												<span
+													class="absolute -top-3 z-10 flex items-center gap-1 rounded-full bg-cream px-2 py-0.5 font-display text-[11px] font-bold whitespace-nowrap text-stage shadow-lg shadow-black/40 {side ? 'right-[70%]' : 'left-[70%]'}"
+													in:scale={{ start: 0.4, duration: 320, easing: backOut }}
+													out:fade={{ duration: 300 }}
+												>
+													{#if deltas[p.id]}<span class={deltas[p.id].v > 0 ? 'text-forest-700' : 'text-attention'}>{deltas[p.id].v > 0 ? '+' : ''}{deltas[p.id].v}</span>{/if}
+													{#if reactions[p.id]}{reactions[p.id].text}{/if}
+												</span>
+											{/key}
+										{/if}
+									</span>
+									<span class="-mt-2 flex items-center {side ? 'mr-1' : 'ml-1'}">
+										{#key p.score}
+											<span class="relative min-w-6 rounded-full px-1.5 text-center font-display text-xs leading-4.5 font-bold tabular shadow-md shadow-black/40" style="background: {p.color}; color: {inkOn(p.color)}" in:scale={{ start: 1.5, duration: 280, easing: backOut }}>{p.score}</span>
+										{/key}
+									</span>
+									{#if !crowded || p.mine}
+										<span class="mt-0.5 truncate px-1 text-[10px] font-semibold text-cream/70 {side ? 'text-right' : ''}" style="width: {size + 8}px">{p.mine ? 'You' : p.name}</span>
+									{/if}
+								</li>
+							{/each}
+						</ul>
+					{/each}
 
-			<div class="-mx-3 min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-3 sm:-mx-4 sm:px-4" {@attach fitRound}>
-				<div class="grid grid-cols-[3.25rem_minmax(0,1fr)_3.25rem] gap-2 sm:grid-cols-[5rem_minmax(0,1fr)_5rem] sm:gap-4">
-					<aside class="flex flex-col gap-3" aria-label="Players">
-						{#each leftSeats as p (p.id)}{@render seat(p)}{/each}
-					</aside>
+					<div class="flex min-w-0 flex-1 flex-col pt-3">
+						<!--
+							The tiles: 7 to a row on a phone (14 on a wider screen), each keeping
+							its place until it is used. They are sized to fit the space, so the
+							whole grid is always in view.
+						-->
+						<div class="no-scrollbar flex min-h-0 flex-1 justify-center {gridFits ? 'items-center' : 'items-start overflow-y-auto overscroll-contain'}" {@attach measureGrid}>
+							<ul class="grid" style="grid-template-columns: repeat({COLS}, {tileSize}px); grid-auto-rows: {tileSize}px; gap: {GAP}px; --tile: {tileSize}px" aria-label="Letters — free for anyone to use" aria-live="polite">
+								{#each slots as t, i (t ? `t${t.id}` : `e${i}`)}
+									{#if t}
+										<li data-tile={t.id} class="tile grid place-items-center font-display font-extrabold {hiddenTiles.includes(t.id) ? 'invisible' : ''}">
+											<span class="tile-face">{t.c}</span>
+										</li>
+									{:else}
+										<li class="slot" aria-hidden="true"></li>
+									{/if}
+								{/each}
+							</ul>
+						</div>
 
-					<div class="flex min-w-0 flex-col gap-4">
-						{#if board.status === 'ready' && board.round > 1}
-							<p class="rounded-lg border border-green-300/40 bg-green-300/10 px-4 py-3 text-sm font-semibold text-green-300" role="status" in:fly={{ y: -8, duration: 300 }}>
-								You're through to {session.final ? 'the final' : `stage ${board.round}`}! This is your new room (Room {board.number}) — the organiser will start it when everyone's ready.
-							</p>
-						{/if}
-						<!-- Tiles left / final countdown -->
-						<div
-							class="rounded-lg border px-4 py-3 transition-colors duration-300 {clock?.finalCountdown ? 'border-attention/60 bg-attention/10' : 'border-stage-line bg-stage-raised/80'}"
-							role="timer"
-							aria-label={clock?.finalCountdown ? `${formatClock(timeLeft)} left` : `${clock?.tilesLeft ?? board.tiles.count} tiles left`}
-						>
-							<div class="flex items-center gap-3">
-								<Timer class="size-5 shrink-0 {clock?.finalCountdown ? 'text-attention' : 'text-green-300'}" />
-								{#if board.status === 'ready'}
-									<span class="font-display text-2xl font-bold tabular text-cream">{board.tiles.count} tiles</span>
-									<span class="ml-auto text-sm text-cream/60">Waiting for the organiser to start…</span>
-								{:else if clock?.finalCountdown}
-									<span class="font-display text-3xl font-bold tabular text-attention">{formatClock(timeLeft)}</span>
-									<span class="ml-auto text-right text-sm font-semibold text-attention">{board.status === 'paused' ? 'Paused' : 'No tiles left — last chance!'}</span>
-								{:else}
-									<span class="font-display text-3xl font-bold tabular text-cream">{clock?.tilesLeft ?? board.tiles.count}</span>
-									<span class="text-xs font-semibold tracking-[0.14em] text-cream/50 uppercase">tiles left</span>
-									<span class="ml-auto text-sm text-cream/60">{board.status === 'paused' ? 'Paused' : formatClock(timeLeft)}</span>
-								{/if}
-							</div>
-							{#if board.status === 'playing' && clock && !clock.finalCountdown}
-								<div class="mt-2 h-1 overflow-hidden rounded-full bg-stage" aria-hidden="true">
-									<div class="h-full rounded-full bg-sun" style="width: {tileProgress * 100}%"></div>
-								</div>
+						<!-- Staging row: where a word being made comes together (the letters themselves fly on the overlay) -->
+						<div class="flex h-12 shrink-0 items-center justify-center gap-1 sm:h-16" aria-hidden="true" data-staging>
+							{#if staging}
+								{@const cell = Math.max(20, Math.min(wide ? 56 : 44, Math.floor(((gridBox?.w ?? 280) - (staging.n - 1) * 4) / staging.n)))}
+								{#each Array(staging.n) as _, i (i)}
+									<span data-stage-cell class="rounded-md" style="width: {cell}px; height: {cell}px"></span>
+								{/each}
+							{:else if board.status === 'ready'}
+								<p class="flex items-center gap-2 text-sm text-cream/60" in:fade><Spinner class="size-3.5" /> Waiting for the organiser to start…</p>
 							{/if}
 						</div>
 
-						{#if alert}
-							<p class="rounded-lg border border-attention/40 bg-attention/10 px-4 py-2 text-sm font-semibold text-attention" in:fly={{ y: -8, duration: 200 }} out:fade role="alert">{alert.text}</p>
-						{/if}
-
-						<!-- Shared letters -->
-						<section aria-label="Letters — free for anyone to use">
-							<ul class="flex min-h-12 flex-wrap justify-center gap-1.5" aria-live="polite">
-								{#each board.pool as t (t.id)}
-									<li
-										in:fly={{ y: -24, duration: 320 }}
-										out:scale={{ start: 0.5, duration: 180 }}
-										class="grid size-10 place-items-center rounded-md border-b-4 border-sun/60 bg-sun font-display text-xl font-bold text-stage shadow-sm sm:size-11"
-									>
-										{t.c}
-									</li>
-								{:else}
-									<li class="self-center text-center text-sm text-cream/50">
-										{board.status === 'ready' ? `Letters drop here every ${(board.tiles.everyMs / 1000).toFixed(1)} s once the round starts.` : 'The next letter is on its way.'}
-									</li>
-								{/each}
-							</ul>
-						</section>
-
-						<!-- Everyone's words, in their owner's colour -->
-						<section class="min-h-24 rounded-xl border border-stage-line bg-stage-raised/60 p-3" aria-label="Words on the table">
-							<ul class="flex flex-wrap justify-center gap-x-3 gap-y-2.5">
-								{#each tableWords as w (w.id)}
-									<li
-										in:scale={{ start: 0.6, duration: 260 }}
-										title="{w.mine ? 'Your' : `${w.ownerName}'s`} word"
-										class="flex gap-0.5 rounded-md p-0.5 transition-opacity duration-200 {w.fresh ? 'word-fresh' : ''} {focusId && focusId !== w.owner ? 'opacity-25' : ''}"
-										style="--ring: {w.color}; {focusId === w.owner ? `box-shadow: 0 0 0 2px ${w.color}` : ''}"
-									>
-										<span class="sr-only">{w.text}, {w.mine ? 'yours' : w.ownerName}</span>
-										{#each [...w.text] as c, i (i)}
-											<span aria-hidden="true" class="grid size-7 place-items-center rounded font-display text-base font-bold sm:size-8 sm:text-lg" style="background: {w.color}; color: {inkOn(w.color)}">{c}</span>
-										{/each}
-									</li>
-								{:else}
-									<li class="self-center py-6 text-sm text-cream/50">Words people make appear here, in their colour.</li>
-								{/each}
-							</ul>
-						</section>
+						<!-- Everyone's words, in their owner's colour (a long table scrolls here) -->
+						<ul class="no-scrollbar flex max-h-[30%] min-h-8 shrink-0 flex-wrap content-start justify-center gap-1.5 overflow-y-auto pb-2 sm:gap-2" aria-label="Words on the table">
+							{#each tableWords as w (w.id)}
+								<li
+									data-word={w.id}
+									animate:flip={{ duration: 320, easing: backOut }}
+									in:scale={{ start: 0.5, duration: 420, easing: backOut }}
+									class="word flex {hiddenWord === w.id ? 'opacity-0' : ''} {w.mine ? 'word-mine' : ''}"
+									style="--word: {w.color}"
+								>
+									<span class="sr-only">{w.text}, {w.mine ? 'yours' : (seatById.get(w.owner)?.name ?? '')}</span>
+									{#each [...w.text] as c, i (i)}
+										<span data-letter={i} aria-hidden="true" class="letter grid h-7 w-5.5 place-items-center font-display text-[15px] font-extrabold sm:h-9 sm:w-7 sm:text-lg" style="color: {inkOn(w.color)}">{c}</span>
+									{/each}
+								</li>
+							{/each}
+						</ul>
 					</div>
-
-					<aside class="flex flex-col gap-3" aria-label="Players">
-						{#each rightSeats as p (p.id)}{@render seat(p)}{/each}
-					</aside>
 				</div>
+
+				<!-- Paused: everything stops behind a big pause mark -->
+				{#if board.status === 'paused'}
+					<div class="absolute inset-0 z-30 grid place-items-center bg-stage/70 backdrop-blur-sm" role="status" transition:fade={{ duration: 250 }}>
+						<div class="text-center" in:scale={{ start: 0.6, duration: 380, easing: backOut }}>
+							<div class="breathe mx-auto grid size-36 place-items-center rounded-full border border-cream/15 bg-cream/5 shadow-[0_0_80px_-20px_var(--color-sun)]">
+								<Pause class="size-20 text-cream" fill="currentColor" strokeWidth={0} />
+							</div>
+							<p class="mt-5 font-display text-2xl font-bold tracking-[0.3em] text-cream uppercase">Paused</p>
+						</div>
+					</div>
+				{/if}
 			</div>
 
-			<!-- Move: pinned under the board, just above the phone keyboard -->
-			<form class="shrink-0 rounded-xl border border-stage-line bg-stage-raised/90 p-3 sm:mx-[6rem] sm:p-4" onsubmit={submit} novalidate>
-				<div class="flex gap-2">
-					<input
-						bind:this={inputEl}
-						bind:value={input}
-						maxlength="20"
-						autocomplete="off"
-						autocapitalize="characters"
-						spellcheck="false"
-						enterkeyhint="send"
-						disabled={!live}
-						placeholder="Type a word and press enter"
-						aria-label="Your word"
-						aria-describedby="move-help move-feedback"
-						onfocus={() => (typing = true)}
-						onblur={() => (typing = false)}
-						class="h-14 min-w-0 flex-1 rounded-lg border-2 bg-stage px-4 font-mono text-xl font-bold tracking-[0.12em] text-cream uppercase outline-none transition-colors placeholder:font-sans placeholder:text-base placeholder:font-normal placeholder:tracking-normal placeholder:text-cream/30 placeholder:normal-case focus:border-green-300 disabled:opacity-50
-							{feedback?.tone === 'error' ? 'border-attention' : 'border-stage-line'}"
-					/>
-					<!-- preventDefault on press keeps focus in the word box, so the keyboard stays up -->
-					<Button type="submit" variant="sun" size="xl" class="px-5!" loading={sending} disabled={!live || sending} onpointerdown={(e: PointerEvent) => e.preventDefault()}>Play</Button>
-				</div>
-				<p id="move-help" class="mt-2 text-xs text-cream/50 {typing ? 'max-sm:hidden' : ''}">
-					Make a word ({board.rules.minWordLength}+ letters) from the letters, or steal any word by adding at least one letter to it. Adding just an S to the end doesn't count.
-				</p>
-				<div id="move-feedback" aria-live="assertive" class="min-h-6 pt-2">
-					{#if feedback}
-						<p class="text-sm {feedback.tone === 'ok' ? 'text-green-300' : 'text-attention'}" in:fly={{ y: -6, duration: 200 }}>{feedback.text}</p>
+			<!-- The word being typed, and (on a phone) the game's own keyboard: the phone's keyboard never opens -->
+			<div class="relative -mx-3 shrink-0 sm:-mx-4 {touch ? '' : 'px-3 pb-3 sm:px-4'}">
+				{#if error}
+					{#key error.key}
+						<p class="absolute -top-8 left-1/2 z-10 -translate-x-1/2 rounded-full bg-cream px-3 py-1 font-display text-xs font-bold tracking-[0.12em] whitespace-nowrap text-stage uppercase shadow-lg shadow-black/40" role="alert" in:fly={{ y: 10, duration: 240, easing: backOut }} out:fade={{ duration: 200 }}>{error.text}</p>
+					{/key}
+				{/if}
+				<div
+					bind:this={wordEl}
+					class="word-box mx-auto flex w-full items-center gap-2 transition-shadow duration-300 {touch ? 'h-12 max-w-md rounded-t-2xl px-3' : 'h-15 max-w-lg rounded-2xl p-2 pl-4'} {error ? 'ring-2 ring-attention/70' : ''} {live ? '' : 'opacity-60'}"
+					aria-label="Your word"
+					aria-live="polite"
+				>
+					{#if touch}<span class="w-8 shrink-0"></span>{/if}
+					<p class="flex min-w-0 flex-1 items-center overflow-hidden {touch ? 'justify-center' : ''}">
+						{#if input}
+							{#each [...input] as c, i (i)}
+								<span class="font-mono text-2xl font-bold text-cream" in:fly={{ y: 10, duration: 160, easing: backOut }}>{c}</span>
+							{/each}
+							<span class="caret ml-0.5 h-6 w-0.5 rounded bg-sun" aria-hidden="true"></span>
+						{:else}
+							<span class="truncate text-base text-cream/45">{live ? 'Type a word and press enter' : board.status === 'paused' ? 'Paused' : 'Waiting to start…'}</span>
+						{/if}
+					</p>
+					{#if touch}
+						<button type="button" class="grid size-8 shrink-0 place-items-center rounded-full text-cream/60 transition-opacity {input ? 'opacity-100' : 'pointer-events-none opacity-0'}" aria-label="Clear" onpointerdown={(e) => keyDown(e, 'clear')} onclick={(e) => keyClick(e, 'clear')}><X class="size-5" /></button>
+					{:else}
+						<Button type="button" variant="sun" size="lg" class="h-11! rounded-xl! px-6!" loading={sending} disabled={!live || sending || !input} onclick={play}>Play</Button>
 					{/if}
 				</div>
-				{#if board.status === 'paused'}
-					<p class="flex items-center gap-2 text-sm text-sun" role="status"><Pause class="size-4" /> The organiser paused the round.</p>
-				{:else if board.status === 'ready'}
-					<p class="text-sm text-cream/60">Everyone starts on 0. Moves open when the round starts.</p>
+				{#if touch}
+					<div class="keyboard px-1 pt-1.5 pb-[max(env(safe-area-inset-bottom),8px)]" role="group" aria-label="Keyboard">
+						{#each KEY_ROWS as row, r (r)}
+							<div class="mx-auto flex max-w-xl justify-center gap-1.25 {r ? 'mt-1.75' : ''} {r === 1 ? 'pl-[4%]' : r === 2 ? 'pl-[9%]' : ''}">
+								{#each row as k (k)}
+									<button
+										type="button"
+										class="key {k.length > 1 ? 'key-wide' : ''} {k === 'enter' ? 'key-enter' : ''} {lit === k ? 'key-lit' : ''}"
+										disabled={!live}
+										aria-label={k === 'back' ? 'Delete' : k === 'enter' ? 'Play word' : k}
+										onpointerdown={(e) => keyDown(e, k)}
+										onclick={(e) => keyClick(e, k)}
+									>
+										{#if k === 'back'}<Delete class="size-5" />{:else if k === 'enter'}{#if sending}<Spinner class="size-4" />{:else}<CornerDownLeft class="size-5" />{/if}{:else}{k}{/if}
+									</button>
+								{/each}
+							</div>
+						{/each}
+					</div>
 				{/if}
-			</form>
+			</div>
 		{:else}
 			<div class="m-auto text-center" role="status">
 				<Wifi class="mx-auto size-8 text-cream/40" />
@@ -567,19 +890,190 @@
 			</div>
 		{/if}
 	</main>
+	<!-- Letters and tiles in flight during a steal -->
+	<div bind:this={overlay} class="pointer-events-none fixed inset-0 z-40" aria-hidden="true"></div>
 </GameStage>
 
 <style>
-	/* A word just made or stolen pulses in its owner's colour. */
-	.word-fresh {
-		animation: word-fresh 0.9s ease-out 2;
+	/* A letter tile: pale, with a lit top edge and a thick lower lip, like a real piece. Sized by --tile. */
+	.tile {
+		border-radius: max(4px, calc(var(--tile) * 0.14));
+		color: #1a1405;
+		background: linear-gradient(180deg, #fff6d6 0%, var(--color-sun-light) 45%, var(--color-sun) 100%);
+		box-shadow:
+			inset 0 1px 0 rgb(255 255 255 / 0.8),
+			inset 0 calc(var(--tile) * -0.08) 0 rgb(120 80 0 / 0.28),
+			0 calc(var(--tile) * 0.12) calc(var(--tile) * 0.25) calc(var(--tile) * -0.1) rgb(0 0 0 / 0.75);
+		/* Drops in from above and settles with a small bounce (Pilfer's 0.8 s slide). */
+		animation: tile-drop 0.8s cubic-bezier(0.45, 1.25, 0.8, 1) both;
+		will-change: transform;
 	}
-	@keyframes word-fresh {
+	.tile-face {
+		font-size: calc(var(--tile) * 0.58);
+		line-height: 1;
+		transform: translateY(calc(var(--tile) * -0.03));
+		text-shadow: 0 1px 0 rgb(255 255 255 / 0.5);
+	}
+	@keyframes tile-drop {
 		0% {
-			box-shadow: 0 0 0 0 var(--ring);
+			transform: translateY(-80vh) scale(0.9);
+			opacity: 0;
+		}
+		12% {
+			opacity: 1;
 		}
 		100% {
-			box-shadow: 0 0 0 10px transparent;
+			transform: translateY(0) scale(1);
+		}
+	}
+	/* Scroll areas scroll like a phone: no visible bar. */
+	.no-scrollbar {
+		scrollbar-width: none;
+	}
+	.no-scrollbar::-webkit-scrollbar {
+		display: none;
+	}
+	/* An empty slot: a shallow well the next tile will land in. */
+	.slot {
+		border-radius: max(4px, calc(var(--tile) * 0.14));
+		background: rgb(0 0 0 / 0.35);
+		box-shadow:
+			inset 0 2px 8px rgb(0 0 0 / 0.6),
+			inset 0 0 0 1px rgb(255 255 255 / 0.08);
+	}
+	/* A word on the table: one solid band in its owner's colour, a letter to a cell (Pilfer's word chips). */
+	.word {
+		border-radius: 6px;
+		overflow: hidden;
+		box-shadow:
+			0 4px 10px -4px rgb(0 0 0 / 0.7),
+			0 0 0 1px color-mix(in srgb, var(--word) 70%, black);
+	}
+	.word-mine {
+		box-shadow:
+			0 4px 10px -4px rgb(0 0 0 / 0.7),
+			0 0 0 2px var(--color-cream);
+	}
+	.letter {
+		background: linear-gradient(180deg, color-mix(in srgb, var(--word) 82%, white) 0%, var(--word) 50%, color-mix(in srgb, var(--word) 85%, black) 100%);
+		text-shadow: 0 1px 1px rgb(0 0 0 / 0.25);
+	}
+	.letter + .letter {
+		box-shadow: inset 1px 0 0 rgb(0 0 0 / 0.18);
+	}
+	/* A seat: a half pill in the player's colour, flush with the screen edge. */
+	.seat {
+		background: radial-gradient(circle at 70% 40%, color-mix(in srgb, var(--seat) 70%, white), var(--seat) 55%, color-mix(in srgb, var(--seat) 70%, black));
+		box-shadow:
+			0 8px 18px -8px var(--seat),
+			inset 0 1px 0 rgb(255 255 255 / 0.35);
+		transition:
+			width 0.35s cubic-bezier(0.3, 1.35, 0.6, 1),
+			box-shadow 0.3s;
+	}
+	/* Your own seat glows gently. */
+	.seat-mine {
+		animation: seat-glow 2.6s ease-in-out infinite;
+	}
+	@keyframes seat-glow {
+		0%,
+		100% {
+			box-shadow:
+				0 0 0 2px var(--color-cream),
+				0 0 14px -2px var(--seat);
+		}
+		50% {
+			box-shadow:
+				0 0 0 2px var(--color-cream),
+				0 0 28px 2px var(--seat);
+		}
+	}
+	/* The word box: a tab sitting on the keyboard (phone) or a panel (computer). */
+	.word-box {
+		background: rgb(0 0 0 / 0.55);
+		border: 1px solid rgb(255 255 255 / 0.08);
+		backdrop-filter: blur(10px);
+	}
+	.caret {
+		animation: caret 1s steps(1) infinite;
+	}
+	@keyframes caret {
+		50% {
+			opacity: 0;
+		}
+	}
+	/* The on-screen keyboard: compact, dark, three rows. */
+	.keyboard {
+		background: rgb(0 0 0 / 0.6);
+		border-top: 1px solid rgb(255 255 255 / 0.06);
+		backdrop-filter: blur(10px);
+		touch-action: manipulation;
+		user-select: none;
+		-webkit-user-select: none;
+	}
+	.key {
+		display: grid;
+		flex: 1 1 0;
+		max-width: 3.25rem;
+		height: 2.9rem;
+		place-items: center;
+		border-radius: 0.45rem;
+		background: #2c3443;
+		color: var(--color-cream);
+		font-family: var(--font-display, inherit);
+		font-size: 1.2rem;
+		font-weight: 700;
+		box-shadow: 0 2px 0 rgb(0 0 0 / 0.55);
+		-webkit-tap-highlight-color: transparent;
+		transition:
+			transform 0.08s,
+			background-color 0.12s;
+	}
+	.key-wide {
+		flex-grow: 1.55;
+		max-width: 4.75rem;
+		background: #5b6578;
+	}
+	.key-enter {
+		background: var(--color-sun);
+		color: var(--color-stage);
+	}
+	.key:active:not(:disabled),
+	.key-lit {
+		transform: translateY(1px) scale(0.94);
+		background: #475167;
+		box-shadow: 0 1px 0 rgb(0 0 0 / 0.55);
+	}
+	.key-enter:active:not(:disabled),
+	.key-enter.key-lit {
+		background: var(--color-sun-light);
+	}
+	.key:disabled {
+		opacity: 0.45;
+	}
+	/* The arc of the ring glows in its colour. */
+	.ring-arc {
+		filter: drop-shadow(0 0 4px currentColor);
+	}
+	/* Last seconds: the ring pulses. */
+	.ring-urgent {
+		animation: ring-urgent 1s ease-in-out infinite;
+	}
+	@keyframes ring-urgent {
+		0%,
+		100% {
+			transform: scale(1);
+		}
+		50% {
+			transform: scale(1.08);
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.tile,
+		.seat-mine,
+		.ring-urgent,
+		.caret {
+			animation: none;
 		}
 	}
 </style>

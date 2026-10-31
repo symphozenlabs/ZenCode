@@ -25,6 +25,7 @@
 		if (/^Z[FS][A-Z2-9]{4}$/.test(c)) return goto(`/join/flap/${c}`);
 		if (/^ZH[A-Z2-9]{4}$/.test(c)) return goto(`/join/heist/${c}`);
 		if (/^ZD[A-Z2-9]{4}$/.test(c)) return goto(`/join/draw/${c}`);
+		if (/^ZT[A-Z2-9]{4}$/.test(c)) return goto(`/join/t/${c}`);
 		if (!JOIN_CODE_RE.test(c)) {
 			error = 'Enter the code shown on the big screen.';
 			return;

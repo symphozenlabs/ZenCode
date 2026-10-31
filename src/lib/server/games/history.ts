@@ -8,7 +8,7 @@ import { SESSIONS } from '$lib/games/tech-word-rush/types';
  * sub-collections with their parent, so each is cleared by name — Scribble's
  * turns (each with its strokes and guesses) included.
  */
-const SUBCOLLECTIONS = ['players', 'playerState', 'names', 'secret', 'rooms', 'boards', 'rounds'] as const;
+const SUBCOLLECTIONS = ['players', 'playerState', 'names', 'secret', 'rooms', 'boards', 'rounds', 'stages'] as const;
 const TURN_SUBCOLLECTIONS = ['strokes', 'guesses'] as const;
 const BATCH = 450; // under Firestore's 500 writes per batch
 

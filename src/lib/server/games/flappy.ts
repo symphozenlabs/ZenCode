@@ -28,6 +28,7 @@ import {
 	type FlapView
 } from '$lib/games/flappy/types';
 import { SESSIONS } from '$lib/games/tech-word-rush/types';
+import { ROOM_JOIN_MESSAGE, type SeatedPlayer, type TournamentTag } from '$lib/games/tournament/types';
 
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no I, L, O, 0, 1
 const MAX_PLAYERS = 300;
@@ -85,6 +86,25 @@ const sessionData = (snap: DocumentSnapshot) => {
 	if (!snap.exists() || !isFlyGame(s?.gameType)) error(404, 'This game session no longer exists.');
 	return s;
 };
+
+/**
+ * A tournament seats its players in this session: the same ids and device
+ * tokens as in the tournament, so their phones carry straight on without
+ * joining again. Nobody else can join a tagged session.
+ */
+export async function seedTournament(db: Firestore, code: string, tag: TournamentTag, members: readonly SeatedPlayer[]) {
+	for (let i = 0; i < members.length; i += 120) {
+		const batch = writeBatch(db); // 3 writes a player, under Firestore's 500
+		for (const m of members.slice(i, i + 120)) {
+			const player: FlapPlayer = { name: m.name, joinedAt: m.joinedAt, score: 0, scoredAt: null, rounds: 0, flying: false, round: 0, flightStartedAt: null };
+			batch.set(playerRef(db, code, m.id), player);
+			batch.set(stateRef(db, code, m.id), { tokenHash: m.tokenHash } satisfies PrivateState);
+			batch.set(doc(db, SESSIONS, code, 'names', sha256(m.name.toLowerCase())), { playerId: m.id });
+		}
+		await batch.commit();
+	}
+	await updateDoc(sessionRef(db, code), { tournament: tag, playerCount: members.length });
+}
 
 // ── Sessions (admin) ─────────────────────────────────────────────────────
 
@@ -246,6 +266,7 @@ export async function join(code: string, rawName: unknown) {
 	const sRef = sessionRef(db, code);
 	const s = sessionData(await getDoc(sRef));
 	if (s.status === 'finished') error(410, 'This game has ended.');
+	if (s.tournament) error(403, ROOM_JOIN_MESSAGE);
 	// Counted rather than kept on the session doc: a join must not write the
 	// doc every phone is listening to, or a full room joining floods them all.
 	if ((await countPlayers(db, code)) >= MAX_PLAYERS) error(409, 'This game is full.');

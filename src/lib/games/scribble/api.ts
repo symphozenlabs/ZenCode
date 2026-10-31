@@ -67,14 +67,19 @@ export function forgetIdentity(code: string) {
 	}
 }
 
-export async function join(code: string, name: string): Promise<Identity> {
-	const res = await post<Identity & { now: number }>(`${BASE}/${code}/join`, { name });
-	const id = { playerId: res.playerId, token: res.token, name: res.name };
+/** Remember this device's player for `code` (a join, or a tournament seating the player here). */
+export function saveIdentity(code: string, id: Identity) {
 	try {
 		localStorage.setItem(key(code), JSON.stringify(id));
 	} catch {
 		/* still playable for this tab */
 	}
+}
+
+export async function join(code: string, name: string): Promise<Identity> {
+	const res = await post<Identity & { now: number }>(`${BASE}/${code}/join`, { name });
+	const id = { playerId: res.playerId, token: res.token, name: res.name };
+	saveIdentity(code, id);
 	return id;
 }
 

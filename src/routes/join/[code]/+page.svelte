@@ -274,6 +274,7 @@
 					<p class="mt-2 text-sun">Guess the tech. Earn the XP.</p>
 					<p class="eyebrow mt-8 text-cream/50">Session</p>
 					<p class="font-mono text-2xl font-bold tracking-[0.2em]">{code}</p>
+					{#if session?.tournament}<p class="mt-6 rounded-lg border border-sun/30 bg-sun/10 px-3 py-2 text-sm text-sun">This game is part of a tournament. <a class="font-semibold underline" href="/join/t/{session.tournament.code}">Open the tournament</a> to take your seat.</p>{/if}
 					<form class="mt-8 space-y-3" onsubmit={submitJoin} novalidate>
 						<label for="name" class="eyebrow block text-cream/60">Enter your name</label>
 						<input
@@ -437,6 +438,7 @@
 						<!-- GAME COMPLETE -->
 						<div class="my-auto text-center">
 							<p class="eyebrow text-green-300">Game complete</p>
+							{#if session?.tournament}<Button variant="sun" class="mt-4 w-fit" href="/join/t/{session.tournament.code}">Back to the tournament</Button>{/if}
 							<p class="mt-1 font-display text-2xl font-bold tracking-tight uppercase">Tech Word Rush</p>
 							<p class="eyebrow mt-8 text-cream/50">Your score</p>
 							<p class="font-display text-6xl font-bold text-sun"><XpCounter value={me?.xp ?? xp} from={0} duration={1400} /> <span class="text-2xl text-cream/60">XP</span></p>

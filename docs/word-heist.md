@@ -4,10 +4,9 @@ A real-time word-stealing game (inspired by Merriam-Webster's Pilfer), run eithe
 
 ## Creating a lobby
 
-**Admin → Games → Word Heist → Start live game** has two choices:
+**Admin → Games → Word Heist → Start live game** creates a **game**: one room, one round, 2–15 players (you choose the limit). The top three make the podium.
 
-- **Create game** — one room, one round, 2–15 players (you choose the limit). The top three make the podium.
-- **Create tournament** — set **participants**, **stages** (2–5, the final included), **players per room** (2–15, default 12) and **go through per room**:
+**Admin → Games → Tournament → Create tournament → Word Heist** creates a **tournament** (see also [tournaments.md](tournaments.md) for the other games): set **participants**, **stages** (2–5, the final included), **players per room** (2–15, default 12) and **go through per room**:
   - **Whatever you set stays as you set it** (the box is highlighted; its × frees it again). Only the boxes you haven't set are worked out, changing as few as possible: free participants become the most the plan takes (going up or down with stages, room size and players going through); with participants set, the stages, room size or players going through that you left free are chosen to fit them.
   - If the boxes you set can't work together, nothing is changed and the form says which ones clash and why (e.g. "1000 participants, 2 stages and rooms of 12 can't work together…").
   - The form lists every stage (players, rooms, how many go through) and refuses plans that can't work, saying why.
@@ -25,6 +24,16 @@ Both share the timing and **Shortest word**. **Round length** is a dropdown (1�
 7. **Reset** (type the code to confirm) deletes all rooms, boards and results and returns every participant to the lobby. Finished games can be cleared from the Games page history.
 
 Participants can be removed from the dashboard (participant list or room detail). In a running round their words leave the board and they drop out of the ranking.
+
+## The phone screen
+
+Modelled frame by frame on Pilfer's own play (`src/assets/videoplayback.mp4`): a round shows only *Tiles left* (a ring in the header; the final countdown once the bag is empty), every player's avatar and points, the tile grid, the words on the table and the word box. No help text or move counts. The round fills the screen exactly; the page never scrolls.
+
+- **Players** sit down the left and right edges (you top-left, the others alternating right and left) as half pills in their colour, with their points underneath. The mover's seat slides out as a banner while their move plays.
+- **Tiles**: 7 to a row on a phone, 14 on a tablet or computer, centred between the players. A tile keeps its slot until it is used; the slot is then left dark and the next tile to drop fills the first empty slot. New tiles drop in from above (0.8 s, with a small bounce). Tiles are sized to fit the space, shrinking as rows are added, so the whole grid stays in view (it only scrolls if tiles would get smaller than 22 px).
+- **Typing**: on touch screens the game shows its own compact three-row keyboard and the phone's keyboard never opens (no autofill bar, nothing pushed off screen). A real keyboard works everywhere: letters, Backspace, Enter to play, Esc to clear.
+- **A move plays out** before the table updates: the screen floods with the mover's colour; a stolen word's letters lift out of the list into a staging row under the grid (the list closes the gap at once) and the tiles used fly in from the grid (their slots go dark); the mover's avatar leaves its seat, sweeps across and each letter it passes takes their colour; the row sinks away as the avatar flies home and the word pops into the list. Points change on the avatars the moment the move lands, with a *Yes!!* for the mover and an *Ouch!* for whoever lost the word. Moves that arrive while catching up (a reconnect) are applied at once.
+- **Paused** shows a large pause mark over the board. Rejected words shake the word box, show one short line and are cleared once the shake ends.
 
 ## Rules
 

@@ -49,8 +49,8 @@ export const GAMES: GameDefinition[] = [
 		id: 'word-heist',
 		name: 'Word Heist',
 		tagline: 'Make words. Steal words. Keep the most letters.',
-		description: 'A knockout word-stealing tournament for big crowds. Everyone scans one QR code, rooms of about ten are made automatically, and the top two in each room go through until one room plays the final.',
-		tags: ['Tournament', 'Word stealing', 'Multi-room'],
+		description: 'A real-time word-stealing game for one room of up to 15: letter tiles drop into a shared row, make words from them or steal a rival’s word by adding a tile. Run it for a big crowd from the Tournament module.',
+		tags: ['Word stealing', 'Real-time', 'Party'],
 		manageHref: '/admin/games/word-heist/moderation',
 		manageLabel: 'Word moderation',
 		presenterHref: (code) => `/admin/games/word-heist/live/${code}`
@@ -65,5 +65,37 @@ export const GAMES: GameDefinition[] = [
 	}
 ];
 
-export const gameName = (id: string) => GAMES.find((g) => g.id === id)?.name ?? id;
-export const presenterHref = (gameType: string, code: string) => (GAMES.find((g) => g.id === gameType) ?? GAMES[0]).presenterHref(code);
+/**
+ * The Tournament module: not a game card, but a way of running any game as a
+ * knockout. Word Heist tournaments keep their own engine and dashboard;
+ * every other game's tournament is run from the tournament dashboard.
+ */
+export const TOURNAMENT: GameDefinition = {
+	id: 'tournament',
+	name: 'Tournament',
+	tagline: 'Any game. Several stages. One champion.',
+	description: 'Pick a game, keep its own rules and setup, and add tournament rules on top: who registers, how many stages, and how many go through. One QR code for everyone.',
+	tags: ['Knockout', 'Multi-stage', 'Any game'],
+	presenterHref: (code) => `/admin/games/tournament/live/${code}`
+};
+
+const ALL = [...GAMES, TOURNAMENT];
+export const gameName = (id: string) => ALL.find((g) => g.id === id)?.name ?? id;
+export const presenterHref = (gameType: string, code: string) => (ALL.find((g) => g.id === gameType) ?? GAMES[0]).presenterHref(code);
+
+/** The phone screen for a session of `gameType`. */
+export function playerHref(gameType: string, code: string): string {
+	switch (gameType) {
+		case 'flappy':
+		case 'symba':
+			return `/join/flap/${code}`;
+		case 'word-heist':
+			return `/join/heist/${code}`;
+		case 'scribble':
+			return `/join/draw/${code}`;
+		case 'tournament':
+			return `/join/t/${code}`;
+		default:
+			return `/join/${code}`;
+	}
+}
