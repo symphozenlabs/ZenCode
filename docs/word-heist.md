@@ -25,6 +25,16 @@ Both share the timing and **Shortest word**. **Round length** is a dropdown (1â€
 
 Participants can be removed from the dashboard (participant list or room detail). In a running round their words leave the board and they drop out of the ranking.
 
+## The phone screen
+
+Modelled frame by frame on Pilfer's own play (`src/assets/videoplayback.mp4`): a round shows only *Tiles left* (a ring in the header; the final countdown once the bag is empty), every player's avatar and points, the tile grid, the words on the table and the word box. No help text or move counts. The round fills the screen exactly; the page never scrolls.
+
+- **Players** sit down the left and right edges (you top-left, the others alternating right and left) as half pills in their colour, with their points underneath. The mover's seat slides out as a banner while their move plays.
+- **Tiles**: 7 to a row on a phone, 14 on a tablet or computer, centred between the players. A tile keeps its slot until it is used; the slot is then left dark and the next tile to drop fills the first empty slot. New tiles drop in from above (0.8 s, with a small bounce). Tiles are sized to fit the space, shrinking as rows are added, so the whole grid stays in view (it only scrolls if tiles would get smaller than 22 px).
+- **Typing**: on touch screens the game shows its own compact three-row keyboard and the phone's keyboard never opens (no autofill bar, nothing pushed off screen). A real keyboard works everywhere: letters, Backspace, Enter to play, Esc to clear.
+- **A move plays out** before the table updates: the screen floods with the mover's colour; a stolen word's letters lift out of the list into a staging row under the grid (the list closes the gap at once) and the tiles used fly in from the grid (their slots go dark); the mover's avatar leaves its seat, sweeps across and each letter it passes takes their colour; the row sinks away as the avatar flies home and the word pops into the list. Points change on the avatars the moment the move lands, with a *Yes!!* for the mover and an *Ouch!* for whoever lost the word. Moves that arrive while catching up (a reconnect) are applied at once.
+- **Paused** shows a large pause mark over the board. Rejected words shake the word box, show one short line and are cleared once the shake ends.
+
 ## Rules
 
 Modelled on Merriam-Webster's Pilfer. Players type a word and press enter â€” they never pick a word first; the server works out what the word is.

@@ -11,7 +11,7 @@
 	const styles: Record<AnyStatus, { label: string; cls: string; dot: string; live?: boolean }> = {
 		lobby: { label: 'Lobby open', cls: 'border-emerald-200 bg-emerald-50 text-emerald-800', dot: 'bg-emerald-500', live: true },
 		stage: { label: 'Stage live', cls: 'border-amber-200 bg-amber-50 text-amber-800', dot: 'bg-amber-500', live: true },
-		playing: { label: 'Flights live', cls: 'border-amber-200 bg-amber-50 text-amber-800', dot: 'bg-amber-500', live: true },
+		playing: { label: 'Live', cls: 'border-amber-200 bg-amber-50 text-amber-800', dot: 'bg-amber-500', live: true },
 		question: { label: 'Word live', cls: 'border-amber-200 bg-amber-50 text-amber-800', dot: 'bg-amber-500', live: true },
 		result: { label: 'Showing result', cls: 'border-emerald-200 bg-emerald-50 text-emerald-800', dot: 'bg-emerald-500', live: true },
 		choosing: { label: 'Picking a word', cls: 'border-amber-200 bg-amber-50 text-amber-800', dot: 'bg-amber-500', live: true },
